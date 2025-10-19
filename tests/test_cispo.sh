@@ -84,6 +84,17 @@ SGLANG_ARGS=(
    --rollout-num-gpus-per-engine 1
 )
 
+MISC_ARGS=(
+   # Disable dropout for deterministic log prob computation
+   # (default dropout in megatron is 0.1)
+   --attention-dropout 0.0
+   --hidden-dropout 0.0
+   # Performance optimizations
+   --accumulate-allreduce-grads-in-fp32
+   --attention-softmax-in-fp32
+   --attention-backend flash
+)
+
 # launch the master node of ray in container
 ray start --head --node-ip-address 127.0.0.1 --num-gpus 1 --disable-usage-stats
 
@@ -104,4 +115,5 @@ ray job submit --address="http://127.0.0.1:8265" \
    ${ROLLOUT_ARGS[@]} \
    ${OPTIMIZER_ARGS[@]} \
    ${CISPO_ARGS[@]} \
-   ${SGLANG_ARGS[@]}
+   ${SGLANG_ARGS[@]} \
+   ${MISC_ARGS[@]}
