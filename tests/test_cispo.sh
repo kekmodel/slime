@@ -14,8 +14,11 @@ pkill -9 python
 
 set -ex
 
+huggingface-cli download --repo-type dataset zhuzilin/gsm8k --local-dir gsm8k
+huggingface-cli download --repo-type model Qwen/Qwen3-0.6B
+
 # will prevent ray from buffering stdout/stderr
-export PYTHONBUFFERED=1
+export PYTHONBUFFERED=16
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/../scripts/models/qwen3-0.6B.sh"
@@ -85,14 +88,14 @@ SGLANG_ARGS=(
 )
 
 MISC_ARGS=(
-   # Disable dropout for deterministic log prob computation
-   # (default dropout in megatron is 0.1)
+   # default dropout in megatron is 0.1
    --attention-dropout 0.0
    --hidden-dropout 0.0
-   # Performance optimizations
-   # --accumulate-allreduce-grads-in-fp32
-   # --attention-softmax-in-fp32
-   # --attention-backend flash
+   # should be good for model performance
+   --accumulate-allreduce-grads-in-fp32
+   --attention-softmax-in-fp32
+   # need to comment this when using model with MLA
+   --attention-backend flash
 )
 
 # launch the master node of ray in container
