@@ -90,9 +90,9 @@ MISC_ARGS=(
    --attention-dropout 0.0
    --hidden-dropout 0.0
    # Performance optimizations
-   --accumulate-allreduce-grads-in-fp32
-   --attention-softmax-in-fp32
-   --attention-backend flash
+   # --accumulate-allreduce-grads-in-fp32
+   # --attention-softmax-in-fp32
+   # --attention-backend flash
 )
 
 # launch the master node of ray in container
