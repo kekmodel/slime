@@ -57,6 +57,7 @@ ROLLOUT_ARGS=(
 
    --global-batch-size 8
 
+   --use-wandb
    --wandb-project slime-cispo-test
    --wandb-group cispo-h100-validation
 )
