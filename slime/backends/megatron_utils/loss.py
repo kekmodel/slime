@@ -10,6 +10,7 @@ from slime.utils.misc import load_function
 from slime.utils.ppo_utils import (
     calculate_log_probs_and_entropy,
     compute_approx_kl,
+    compute_cispo_loss,
     compute_policy_loss,
     get_advantages_and_returns,
     get_grpo_returns,
@@ -236,7 +237,7 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
             for i in range(len(log_probs))
         ]
 
-    if args.advantage_estimator in ["grpo", "gspo"]:
+    if args.advantage_estimator in ["grpo", "gspo", "cispo"]:
         rewards = torch.tensor(rewards, dtype=torch.float32, device=kl[0].device)
         returns = get_grpo_returns(rewards, kl)
         # TODO: is the copy necessary?
@@ -393,7 +394,9 @@ def policy_loss_function(
 
     log_probs = log_probs_and_entropy["log_probs"]
 
-    if args.advantage_estimator == "gspo":
+    # Compute KL divergence: GSPO and CISPO use sequence-level (per-sample average),
+    # while GRPO/PPO use token-level KL
+    if args.advantage_estimator in ["gspo", "cispo"]:
         full_log_probs = [
             all_gather_with_cp(log_prob, total_length, response_length)
             for log_prob, total_length, response_length in zip(log_probs, total_lengths, response_lengths)
@@ -416,7 +419,11 @@ def policy_loss_function(
         log_probs = torch.cat(log_probs, dim=0)
         ppo_kl = old_log_probs - log_probs
 
-    pg_loss, pg_clipfrac = compute_policy_loss(ppo_kl, advantages, args.eps_clip, args.eps_clip_high)
+    # Compute policy loss: CISPO uses upper truncation with stop-gradient
+    if args.advantage_estimator == "cispo":
+        pg_loss, pg_clipfrac = compute_cispo_loss(ppo_kl, log_probs, advantages, args.eps_clip_high)
+    else:
+        pg_loss, pg_clipfrac = compute_policy_loss(ppo_kl, advantages, args.eps_clip, args.eps_clip_high)
 
     # Apply TIS off-policy correction using importance sampling if enabled
     if args.use_tis:
