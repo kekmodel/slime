@@ -17,27 +17,29 @@ set -ex
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=1
 
-MODEL_ARGS=(
-   --swiglu
-   --num-layers 28
-   --hidden-size 1024
-   --ffn-hidden-size 3072
-   --num-attention-heads 16
-   --group-query-attention
-   --num-query-groups 8
-   --use-rotary-position-embeddings
-   --disable-bias-linear
-   --normalization "RMSNorm"
-   --norm-epsilon 1e-6
-   --rotary-base 1000000
-   --vocab-size 151936
-   --kv-channels 128
-   --qk-layernorm
-)
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+source "${SCRIPT_DIR}/../scripts/models/qwen3-0.6B.sh"
+
+HF_MODEL="Qwen/Qwen3-0.6B"
+HF_CACHE_DIR="${HOME}/.cache/huggingface/hub"
+TORCH_DIST_DIR="/root/Qwen3-0.6B_torch_dist"
+
+# Convert HF model to Megatron torch_dist format if not already converted
+if [ ! -d "${TORCH_DIST_DIR}" ]; then
+    echo "Converting ${HF_MODEL} to torch_dist format..."
+    PYTHONPATH=/root/Megatron-LM python /workspace/tools/convert_hf_to_torch_dist.py \
+        ${MODEL_ARGS[@]} \
+        --hf-checkpoint ${HF_MODEL} \
+        --save ${TORCH_DIST_DIR} \
+        --tensor-model-parallel-size 1 \
+        --pipeline-model-parallel-size 1
+fi
 
 CKPT_ARGS=(
-   --hf-checkpoint Qwen/Qwen3-0.6B
-   --pretrained-checkpoint Qwen/Qwen3-0.6B
+   --hf-checkpoint ${HF_MODEL}
+   --ref-load ${TORCH_DIST_DIR}
+   --save /root/Qwen3-0.6B_cispo_slime
+   --save-interval 10
 )
 
 ROLLOUT_ARGS=(
@@ -87,7 +89,8 @@ ray start --head --node-ip-address 127.0.0.1 --num-gpus 1 --disable-usage-stats
 ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json='{
      "env_vars": {
-        "no_proxy": "localhost,127.0.0.1,0.0.0.0,${MASTER_ADDR}"
+        "no_proxy": "localhost,127.0.0.1,0.0.0.0,${MASTER_ADDR}",
+        "PYTHONPATH": "/root/Megatron-LM"
      }
    }' \
    -- python3 train.py \
