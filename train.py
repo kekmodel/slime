@@ -34,17 +34,20 @@ def train(args):
         if args.eval_interval is not None and rollout_id == 0:
             ray.get(rollout_manager.eval.remote(rollout_id))
 
-        rollout_data_ref = ray.get(rollout_manager.generate.remote(rollout_id))
+        rollout_data_ref = ray.get(
+            rollout_manager.generate.remote(rollout_id)
+        )  # input data로 롤아웃해서 reward까지 추가하여 RL train data 생성
 
         if args.offload:
             ray.get(rollout_manager.offload.remote())
 
-        if args.use_critic:
+        if args.use_critic:  # critic model이 있을 때
             critic_train_handle = critic_model.async_train(rollout_id, rollout_data_ref)
-            if rollout_id >= args.num_critic_only_steps:
+            if rollout_id >= args.num_critic_only_steps:  # 일정 step 조건을 만족하면 actor model도 학습
                 ray.get(actor_model.async_train(rollout_id, rollout_data_ref))
             ray.get(critic_train_handle)
         else:
+            # critic model이 없을 때는 바로 actor model 학습
             ray.get(actor_model.async_train(rollout_id, rollout_data_ref))
 
         if args.save_interval is not None and (
@@ -67,7 +70,7 @@ def train(args):
 
             ray.get(rollout_manager.onload.remote(tags=[GPU_MEMORY_TYPE_WEIGHTS]))
 
-        actor_model.update_weights()
+        actor_model.update_weights()  # actor model의 weight를 sglang에 동기화
 
         if args.offload:
             ray.get(rollout_manager.onload.remote(tags=[GPU_MEMORY_TYPE_KV_CACHE]))
