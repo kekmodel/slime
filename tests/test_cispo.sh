@@ -51,18 +51,18 @@ ROLLOUT_ARGS=(
    --label-key answer
    --apply-chat-template
    --rollout-shuffle
-   --rm-type deepscaler
-   --num-rollout 2
-   --rollout-batch-size 2
+   --rm-type math
+   --num-rollout 100
+   --rollout-batch-size 8
    --n-samples-per-prompt 4
-   --rollout-max-response-len 2048
+   --rollout-max-response-len 1024
    --rollout-temperature 0.8
 
-   --global-batch-size 8
+   --global-batch-size 32
 
    --use-wandb
    --wandb-project slime-cispo-test
-   --wandb-group cispo-h100-validation
+   --wandb-group cispo-h100-long-run
 )
 
 CISPO_ARGS=(
@@ -105,7 +105,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json='{
      "env_vars": {
         "no_proxy": "localhost,127.0.0.1,0.0.0.0,${MASTER_ADDR}",
-        "PYTHONPATH": "/root/Megatron-LM"
+        "PYTHONPATH": "/root/Megatron-LM",
      }
    }' \
    -- python3 train.py \
