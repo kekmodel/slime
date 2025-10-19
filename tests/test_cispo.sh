@@ -37,6 +37,7 @@ MODEL_ARGS=(
 
 CKPT_ARGS=(
    --hf-checkpoint Qwen/Qwen3-0.6B
+   --pretrained-checkpoint Qwen/Qwen3-0.6B
 )
 
 ROLLOUT_ARGS=(
