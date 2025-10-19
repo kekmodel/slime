@@ -17,11 +17,11 @@ set -ex
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=1
 
-# Get repository root directory
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." &>/dev/null && pwd)"
+# Get repository root directory (POSIX compatible)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-source "${REPO_ROOT}/scripts/models/qwen3-0.6B.sh"
+. "${REPO_ROOT}/scripts/models/qwen3-0.6B.sh"
 
 HF_MODEL="Qwen/Qwen3-0.6B"
 HF_CACHE_DIR="${HOME}/.cache/huggingface/hub"
