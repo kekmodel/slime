@@ -27,7 +27,8 @@ TORCH_DIST_DIR="/root/Qwen3-0.6B_torch_dist"
 # Convert HF model to Megatron torch_dist format if not already converted
 if [ ! -d "${TORCH_DIST_DIR}" ]; then
     echo "Converting ${HF_MODEL} to torch_dist format..."
-    PYTHONPATH=/root/Megatron-LM python /workspace/tools/convert_hf_to_torch_dist.py \
+    cd /workspace/slime
+    PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
         ${MODEL_ARGS[@]} \
         --hf-checkpoint ${HF_MODEL} \
         --save ${TORCH_DIST_DIR} \
