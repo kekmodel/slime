@@ -17,6 +17,24 @@ set -ex
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=1
 
+MODEL_ARGS=(
+   --swiglu
+   --num-layers 28
+   --hidden-size 1024
+   --ffn-hidden-size 3072
+   --num-attention-heads 16
+   --group-query-attention
+   --num-query-groups 8
+   --use-rotary-position-embeddings
+   --disable-bias-linear
+   --normalization "RMSNorm"
+   --norm-epsilon 1e-6
+   --rotary-base 1000000
+   --vocab-size 151936
+   --kv-channels 128
+   --qk-layernorm
+)
+
 CKPT_ARGS=(
    --hf-checkpoint Qwen/Qwen3-0.6B
 )
@@ -76,6 +94,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --actor-num-gpus-per-node 1 \
    --colocate \
    --train-backend megatron \
+   ${MODEL_ARGS[@]} \
    ${CKPT_ARGS[@]} \
    ${ROLLOUT_ARGS[@]} \
    ${OPTIMIZER_ARGS[@]} \
