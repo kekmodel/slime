@@ -27,7 +27,14 @@ TORCH_DIST_DIR="/root/Qwen3-0.6B_torch_dist"
 # Convert HF model to Megatron torch_dist format if not already converted
 if [ ! -d "${TORCH_DIST_DIR}" ]; then
     echo "Converting ${HF_MODEL} to torch_dist format..."
-    PYTHONPATH=/root/Megatron-LM python "${SCRIPT_DIR}/../tools/convert_hf_to_torch_dist.py" \
+    # Use torchrun for proper distributed initialization
+    CUDA_VISIBLE_DEVICES=0 PYTHONPATH=/root/Megatron-LM torchrun \
+        --nproc_per_node=1 \
+        --nnodes=1 \
+        --node_rank=0 \
+        --master_addr=127.0.0.1 \
+        --master_port=6000 \
+        "${SCRIPT_DIR}/../tools/convert_hf_to_torch_dist.py" \
         ${MODEL_ARGS[@]} \
         --hf-checkpoint ${HF_MODEL} \
         --save ${TORCH_DIST_DIR} \
