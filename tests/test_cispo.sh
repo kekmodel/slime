@@ -105,7 +105,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json='{
      "env_vars": {
         "no_proxy": "localhost,127.0.0.1,0.0.0.0,${MASTER_ADDR}",
-        "PYTHONPATH": "/root/Megatron-LM",
+        "PYTHONPATH": "/root/Megatron-LM"
      }
    }' \
    -- python3 train.py \
