@@ -1,7 +1,6 @@
 #!/bin/bash
 
-# CISPO test script for single GPU (H100)
-# Based on GSPO test but adapted for CISPO algorithm
+# CISPO test script for single GPU (H100) with Megatron backend
 
 # for rerun the task
 pkill -9 sglang
@@ -19,23 +18,26 @@ set -ex
 export PYTHONBUFFERED=1
 
 CKPT_ARGS=(
-   --hf-checkpoint Qwen/Qwen2.5-0.5B-Instruct  # Small model for quick testing
+   --hf-checkpoint Qwen/Qwen3-0.6B
 )
 
 ROLLOUT_ARGS=(
-   --prompt-data dapo-math-17k/dapo-math-17k.jsonl
-   --input-key prompt
-   --label-key label
+   --prompt-data gsm8k/train.parquet
+   --input-key question
+   --label-key answer
    --apply-chat-template
    --rollout-shuffle
    --rm-type deepscaler
-   --num-rollout 2  # Quick test with 2 rollouts
-   --rollout-batch-size 2  # Reduced for single GPU
+   --num-rollout 2
+   --rollout-batch-size 2
    --n-samples-per-prompt 4
-   --rollout-max-response-len 2048  # Reduced for faster testing
+   --rollout-max-response-len 2048
    --rollout-temperature 0.8
 
-   --global-batch-size 8  # Reduced for single GPU
+   --global-batch-size 8
+
+   --wandb-project slime-cispo-test
+   --wandb-group cispo-h100-validation
 )
 
 CISPO_ARGS=(
@@ -44,7 +46,7 @@ CISPO_ARGS=(
    --kl-loss-type low_var_kl
    --kl-coef 0.00
    --entropy-coef 0.00
-   --eps-clip-high 5.0  # CISPO upper truncation (absolute value)
+   --eps-clip-high 5.0
 )
 
 OPTIMIZER_ARGS=(
@@ -73,7 +75,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --actor-num-nodes 1 \
    --actor-num-gpus-per-node 1 \
    --colocate \
-   --train-backend fsdp \
+   --train-backend megatron \
    ${CKPT_ARGS[@]} \
    ${ROLLOUT_ARGS[@]} \
    ${OPTIMIZER_ARGS[@]} \
