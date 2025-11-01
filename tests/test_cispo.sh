@@ -56,7 +56,7 @@ ROLLOUT_ARGS=(
    --rollout-batch-size 8
    --n-samples-per-prompt 4
    --rollout-max-response-len 1024
-   --rollout-temperature 0.8
+   --rollout-temperature 1.0
 
    --global-batch-size 32
 
@@ -67,6 +67,7 @@ ROLLOUT_ARGS=(
 
 CISPO_ARGS=(
    --advantage-estimator cispo
+   --disable-grpo-std-normalization  # Dr. GRPO: mean-centering만 (binary reward에 최적)
    --kl-loss-coef 0.00
    --kl-loss-type low_var_kl
    --kl-coef 0.00
@@ -85,6 +86,7 @@ OPTIMIZER_ARGS=(
 
 SGLANG_ARGS=(
    --rollout-num-gpus-per-engine 1
+   --sglang-enable-fp32-lm-head  # FP32 precision for lm_head (MiniMax-M1 Section 4.3.2)
 )
 
 MISC_ARGS=(
