@@ -62,7 +62,20 @@ class Dataset:
                     assert isinstance(tools, list), f"tools must be a list, got {type(tools)} instead"
                 else:
                     tools = None
-                template_input = [{"role": "user", "content": prompt_content}] if multimodal_keys else prompt_content
+
+                # Prepare template input based on prompt_content type
+                if multimodal_keys:
+                    # Multimodal: prompt_content is already a list of content items
+                    # e.g., [{"type": "text", "text": "..."}, {"type": "image", "path": "..."}]
+                    template_input = [{"role": "user", "content": prompt_content}]
+                elif isinstance(prompt_content, str):
+                    # Plain string: convert to message format for single-turn chat
+                    template_input = [{"role": "user", "content": prompt_content}]
+                else:
+                    # Already in message format: list of message dicts
+                    # e.g., [{"role": "user", "content": "..."}] or multi-turn conversation
+                    template_input = prompt_content
+
                 prompt = tokenizer.apply_chat_template(
                     template_input, tools, tokenize=False, add_generation_prompt=True
                 )
