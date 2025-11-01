@@ -138,3 +138,8 @@ ray job submit --address="http://127.0.0.1:8265" \
    ${CISPO_ARGS[@]} \
    ${SGLANG_ARGS[@]} \
    ${MISC_ARGS[@]}
+
+# Auto-stop pod after training (uncomment to enable)
+echo "Training complete. Stopping pod in 60 seconds..."
+sleep 60
+runpodctl stop pod $RUNPOD_POD_ID
