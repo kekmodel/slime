@@ -21,7 +21,7 @@ python3 -c "
 from datasets import load_dataset
 import os
 
-cache_dir = os.environ.get('CACHE_DIR', '/root/.cache/datasets')
+cache_dir = os.environ.get('CACHE_DIR', '/root/.cache/huggingface/datasets')
 os.makedirs(f'{cache_dir}/gsm8k', exist_ok=True)
 
 # Download GSM8K train split
