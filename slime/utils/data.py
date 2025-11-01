@@ -71,9 +71,25 @@ class Dataset:
                 elif isinstance(prompt_content, str):
                     # Plain string: convert to message format for single-turn chat
                     template_input = [{"role": "user", "content": prompt_content}]
+                elif isinstance(prompt_content, list):
+                    # List format: check if it has proper message structure
+                    if len(prompt_content) > 0 and isinstance(prompt_content[0], dict):
+                        # Check if first message has 'role' field
+                        if "role" in prompt_content[0]:
+                            # Standard message format: [{"role": "user", "content": "..."}]
+                            template_input = prompt_content
+                        elif "content" in prompt_content[0]:
+                            # DAPO format without role: [{"content": "..."}]
+                            # Convert to standard format by adding default role
+                            template_input = [{"role": "user", "content": msg["content"]} for msg in prompt_content]
+                        else:
+                            # Unknown format, pass through
+                            template_input = prompt_content
+                    else:
+                        # Empty list or non-dict items, pass through
+                        template_input = prompt_content
                 else:
-                    # Already in message format: list of message dicts
-                    # e.g., [{"role": "user", "content": "..."}] or multi-turn conversation
+                    # Other types: pass through as-is
                     template_input = prompt_content
 
                 prompt = tokenizer.apply_chat_template(
