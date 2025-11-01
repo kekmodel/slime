@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# CISPO test script for single GPU (H100) with Megatron backend
+# GRPO test script for single GPU (H100) with Megatron backend
 
 # for rerun the task
 pkill -9 sglang
@@ -41,7 +41,7 @@ fi
 CKPT_ARGS=(
    --hf-checkpoint ${HF_MODEL}
    --ref-load ${TORCH_DIST_DIR}
-   # --save /root/.cache/huggingface/slime/checkpoints/cispo-qwen3-0.6B
+   # --save /root/.cache/huggingface/slime/checkpoints/grpo-qwen3-0.6B
    # --save-interval 10
 )
 
@@ -62,7 +62,7 @@ ROLLOUT_ARGS=(
 
    --use-wandb
    --wandb-project slime-cispo-test
-   --wandb-group cispo-h100-mean-only
+   --wandb-group grpo-h100-mean-only
 )
 
 EVAL_ARGS=(
@@ -73,14 +73,15 @@ EVAL_ARGS=(
    --eval-top-k 1
 )
 
-CISPO_ARGS=(
-   --advantage-estimator cispo
+GRPO_ARGS=(
+   --advantage-estimator grpo
    --disable-grpo-std-normalization  # Dr. GRPO: mean-centering만 (binary reward에 최적)
    --kl-loss-coef 0.00
    --kl-loss-type low_var_kl
    --kl-coef 0.00
    --entropy-coef 0.00
-   --eps-clip-high 5.0
+   --eps-clip 0.2
+   --eps-clip-high 0.26
 )
 
 OPTIMIZER_ARGS=(
@@ -132,6 +133,6 @@ ray job submit --address="http://127.0.0.1:8265" \
    ${ROLLOUT_ARGS[@]} \
    ${EVAL_ARGS[@]} \
    ${OPTIMIZER_ARGS[@]} \
-   ${CISPO_ARGS[@]} \
+   ${GRPO_ARGS[@]} \
    ${SGLANG_ARGS[@]} \
    ${MISC_ARGS[@]}
