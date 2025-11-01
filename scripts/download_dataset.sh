@@ -15,7 +15,11 @@ import os
 os.makedirs('gsm8k', exist_ok=True)
 
 # Download GSM8K train split
-dataset = load_dataset('gsm8k', 'main', split='train')
+# Note: config name is 'main' for openai/gsm8k, 'default' for gsm8k
+try:
+    dataset = load_dataset('openai/gsm8k', 'main', split='train')
+except:
+    dataset = load_dataset('gsm8k', split='train')
 
 # Save as parquet
 dataset.to_parquet('gsm8k/train.parquet')
