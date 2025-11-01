@@ -17,6 +17,11 @@ set -ex
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=1
 
+# Use 200GB cache volume for tmp directories
+export TMPDIR=/root/.cache/ray_tmp
+export RAY_TMPDIR=/root/.cache/ray_tmp
+mkdir -p "$TMPDIR"
+
 # Get repository root directory (POSIX compatible)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -52,7 +57,7 @@ ROLLOUT_ARGS=(
    --apply-chat-template
    --rollout-shuffle
    --rm-type math
-   --num-rollout 200
+   --num-rollout 100
    --rollout-batch-size 32
    --n-samples-per-prompt 8
    --rollout-max-response-len 4096
