@@ -17,6 +17,11 @@ set -ex
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=1
 
+# Use 200GB cache volume for tmp directories
+export TMPDIR=/root/.cache/ray_tmp
+export RAY_TMPDIR=/root/.cache/ray_tmp
+mkdir -p "$TMPDIR"
+
 # Get repository root directory (POSIX compatible)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
