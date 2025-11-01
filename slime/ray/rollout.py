@@ -432,6 +432,12 @@ def _log_eval_rollout_data(rollout_id, args, data):
         if "truncated" in data[key]:
             truncated = data[key]["truncated"]
             log_dict[f"eval/{key}-truncated_ratio"] = sum(truncated) / len(truncated)
+        if "response_lengths" in data[key]:
+            response_lengths = data[key]["response_lengths"]
+            if response_lengths:  # Check for non-empty list
+                log_dict[f"eval/{key}-response_length_mean"] = sum(response_lengths) / len(response_lengths)
+                log_dict[f"eval/{key}-response_length_max"] = max(response_lengths)
+                log_dict[f"eval/{key}-response_length_min"] = min(response_lengths)
 
     print(f"eval {rollout_id}: {log_dict}")
 

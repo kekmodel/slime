@@ -97,6 +97,8 @@ OPTIMIZER_ARGS=(
 SGLANG_ARGS=(
    --rollout-num-gpus-per-engine 1
    --sglang-mem-fraction-static 0.7
+   --sglang-log-level warning
+   --sglang-log-level-http error
    # Note: FP32 precision is automatically provided by Megatron
    # via --attention-softmax-in-fp32 and --accumulate-allreduce-grads-in-fp32
    # LM head log-probs are automatically upcast to FP32
