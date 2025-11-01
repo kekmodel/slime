@@ -67,11 +67,11 @@ ROLLOUT_ARGS=(
 )
 
 EVAL_ARGS=(
-   # --eval-interval 10
-   # --eval-prompt-data gsm8k /root/.cache/huggingface/datasets/gsm8k/test.parquet
-   # --n-samples-per-eval-prompt 1
-   # --eval-max-response-len 4096
-   # --eval-top-k 1
+   --eval-interval 10
+   --eval-prompt-data gsm8k /root/.cache/huggingface/datasets/gsm8k/test.parquet
+   --n-samples-per-eval-prompt 1
+   --eval-max-response-len 4096
+   --eval-top-k 1
 )
 
 CISPO_ARGS=(
