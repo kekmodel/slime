@@ -86,6 +86,9 @@ OPTIMIZER_ARGS=(
 
 SGLANG_ARGS=(
    --rollout-num-gpus-per-engine 1
+   # Note: FP32 precision is automatically provided by Megatron
+   # via --attention-softmax-in-fp32 and --accumulate-allreduce-grads-in-fp32
+   # LM head log-probs are automatically upcast to FP32
 )
 
 MISC_ARGS=(

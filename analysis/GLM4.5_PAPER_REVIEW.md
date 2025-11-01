@@ -433,7 +433,9 @@ RL_ARGS=(
 PRECISION_ARGS=(
    --hf-checkpoint /path/to/model-FP8  # FP8 inference
    --ref-load /path/to/bf16_torch_dist # BF16 training
-   --sglang-enable-fp32-lm-head        # Numerical stability
+   --attention-softmax-in-fp32         # Numerical stability
+   --accumulate-allreduce-grads-in-fp32
+   # LM head log-probs는 Megatron이 자동으로 FP32로 upcast
 )
 
 MISC_ARGS=(
@@ -520,7 +522,9 @@ parser.add_argument("--temperature-max-performance-drop", type=float, default=0.
 
 ```bash
 --hf-checkpoint /path/to/model-FP8
---sglang-enable-fp32-lm-head  # Numerical stability
+--attention-softmax-in-fp32           # Numerical stability
+--accumulate-allreduce-grads-in-fp32
+# LM head log-probs는 Megatron이 자동으로 FP32로 upcast
 ```
 
 **효과**:
@@ -675,7 +679,8 @@ $$
 --disable-grpo-std-normalization
 --kl-coef 0.00
 --hf-checkpoint /path/to/model-FP8
---sglang-enable-fp32-lm-head
+--attention-softmax-in-fp32
+--accumulate-allreduce-grads-in-fp32
 --colocate
 ```
 

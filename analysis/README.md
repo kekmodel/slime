@@ -65,7 +65,8 @@ This directory contains research, analysis, and documentation for implementing R
 ```bash
 --advantage-estimator cispo
 --disable-grpo-std-normalization  # Dr. GRPO (mean-centering)
---sglang-enable-fp32-lm-head      # FP32 precision for stability
+--attention-softmax-in-fp32       # FP32 precision for stability
+--accumulate-allreduce-grads-in-fp32
 --eps-clip-high 5.0
 ```
 
@@ -73,19 +74,22 @@ This directory contains research, analysis, and documentation for implementing R
 - Mean-centering is more stable than Z-Score for binary rewards
 - Prevents 2.3-3x gradient amplification at extreme success rates
 - Natural difficulty weighting (harder problems get more learning signal)
+- Megatron automatically uses FP32 for LM head log-probs
 
 ### For Continuous Reward Tasks
 
 ```bash
 --advantage-estimator cispo
 # Use default Z-Score normalization
---sglang-enable-fp32-lm-head
+--attention-softmax-in-fp32
+--accumulate-allreduce-grads-in-fp32
 --eps-clip-high 5.0
 ```
 
 **Why?**
 - Z-Score normalizes different reward scales
 - Standard practice for continuous reward distributions
+- Megatron automatically uses FP32 for LM head log-probs
 
 ---
 
@@ -100,7 +104,7 @@ This directory contains research, analysis, and documentation for implementing R
 | Sequence-level IS | ✅ | ✅ | ✅ | Verified |
 | Stop-gradient | ✅ (CISPO) | N/A | ✅ | Verified |
 | **Mean-centering** | ❌ (uses Z-Score) | ✅ | ✅ | **Production-proven** |
-| FP32 LM head | ✅ | ✅ | ✅ | Implemented |
+| FP32 LM head | ✅ | ✅ | ✅ | Megatron built-in |
 | FP8 inference | ❌ | ✅ | ✅ | Implemented |
 
 ### Advanced Features

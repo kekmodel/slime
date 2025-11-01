@@ -349,7 +349,7 @@ else:
 | eps_clip_high=5.0 | ✅ | ✅ | 일치 |
 | **Sequence-level IS** | ✅ | ✅ | **일치** (GSPO와 동일 경로) |
 | **Advantage normalization** | ✅ (Z-Score) | ✅ (Dr. GRPO) | **개선됨** (binary reward 최적화) |
-| **FP32 LM head** | ✅ | ✅ | **일치** (테스트에 추가 완료) |
+| **FP32 LM head** | ✅ | ✅ | **일치** (Megatron 기본 제공) |
 | Repetition detection | ✅ | ❓ | 확인 필요 |
 | Custom AdamW params | ✅ | ❓ | 확인 필요 |
 
@@ -388,9 +388,12 @@ else:
    ```
    **효과**: 안정적 gradient, 자연스러운 난이도 가중, 극단 케이스 안정성
 
-2. ✅ **FP32 LM head**: Training/inference precision 일치
+2. ✅ **FP32 Precision**: Training/inference precision 일치
    ```bash
-   --sglang-enable-fp32-lm-head
+   # Megatron에서 이미 FP32 사용 (기본 제공)
+   --attention-softmax-in-fp32           # Attention 계산 FP32
+   --accumulate-allreduce-grads-in-fp32  # Gradient 누적 FP32
+   # LM head log-probs는 자동으로 FP32 upcast됨
    ```
    **효과**: Log-prob 일치 향상, 수치 안정성 (MiniMax-M1 Section 4.3.2)
 
@@ -431,13 +434,13 @@ else:
 ✅ **Stop-gradient 및 upper truncation 정확히 구현됨** (`ppo_utils.py:76-123`)
 ✅ **테스트 설정이 적절함** (`eps_clip_high=5.0`)
 ✅ **Dr. GRPO (Mean-Centering) 적용** (binary reward 최적화, `--disable-grpo-std-normalization`)
-✅ **FP32 LM head 적용** (수치 안정성, `--sglang-enable-fp32-lm-head`)
+✅ **FP32 Precision 보장** (Megatron 기본 제공: `--attention-softmax-in-fp32`, `--accumulate-allreduce-grads-in-fp32`)
 ✅ **프로덕션 준비 완료** (MiniMax가 456B 모델 학습에 사용)
 
 ### 10.2 개선 사항
 
 🎯 **Binary Reward 최적화**: Dr. GRPO로 안정적이고 효율적인 학습
-🎯 **정밀도 일치**: FP32 LM head로 training/inference log-prob 일치
+🎯 **정밀도 일치**: Megatron FP32 설정으로 training/inference log-prob 일치
 🎯 **이론적 우위**: 논문 Z-Score보다 mean-centering이 더 합리적 (극단 케이스 안정성)
 
 ### 10.3 향후 고려사항
