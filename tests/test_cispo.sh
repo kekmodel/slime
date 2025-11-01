@@ -86,7 +86,6 @@ OPTIMIZER_ARGS=(
 
 SGLANG_ARGS=(
    --rollout-num-gpus-per-engine 1
-   --sglang-enable-fp32-lm-head  # FP32 precision for lm_head (MiniMax-M1 Section 4.3.2)
 )
 
 MISC_ARGS=(
