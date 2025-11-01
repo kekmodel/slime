@@ -41,8 +41,8 @@ fi
 CKPT_ARGS=(
    --hf-checkpoint ${HF_MODEL}
    --ref-load ${TORCH_DIST_DIR}
-   --save /root/Qwen3-0.6B_cispo_slime
-   --save-interval 10
+   # --save /root/.cache/huggingface/slime/checkpoints/cispo-qwen3-0.6B
+   # --save-interval 10
 )
 
 ROLLOUT_ARGS=(
