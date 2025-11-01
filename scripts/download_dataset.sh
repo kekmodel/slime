@@ -27,16 +27,21 @@ os.makedirs(f'{cache_dir}/gsm8k', exist_ok=True)
 # Download GSM8K train split
 # Note: config name is 'main' for openai/gsm8k, 'default' for gsm8k
 try:
-    dataset = load_dataset('openai/gsm8k', 'main', split='train')
+    train_dataset = load_dataset('openai/gsm8k', 'main', split='train')
+    test_dataset = load_dataset('openai/gsm8k', 'main', split='test')
 except:
-    dataset = load_dataset('gsm8k', split='train')
+    train_dataset = load_dataset('gsm8k', split='train')
+    test_dataset = load_dataset('gsm8k', split='test')
 
 # Save as parquet to cache directory
-dataset.to_parquet(f'{cache_dir}/gsm8k/train.parquet')
+train_dataset.to_parquet(f'{cache_dir}/gsm8k/train.parquet')
+test_dataset.to_parquet(f'{cache_dir}/gsm8k/test.parquet')
 
-print(f'✓ Downloaded {len(dataset)} GSM8K samples')
+print(f'✓ Downloaded {len(train_dataset)} GSM8K train samples')
 print(f'  Saved to: {cache_dir}/gsm8k/train.parquet')
-print(f'  First sample keys: {list(dataset[0].keys())}')
+print(f'✓ Downloaded {len(test_dataset)} GSM8K test samples')
+print(f'  Saved to: {cache_dir}/gsm8k/test.parquet')
+print(f'  First sample keys: {list(train_dataset[0].keys())}')
 "
 
 # Create symlink

@@ -46,13 +46,13 @@ CKPT_ARGS=(
 )
 
 ROLLOUT_ARGS=(
-   --prompt-data gsm8k/train.parquet
+   --prompt-data /root/.cache/huggingface/datasets/gsm8k/train.parquet
    --input-key question
    --label-key answer
    --apply-chat-template
    --rollout-shuffle
    --rm-type math
-   --num-rollout 1000
+   --num-rollout 3000
    --rollout-batch-size 2
    --n-samples-per-prompt 8
    --rollout-max-response-len 4096
@@ -63,6 +63,14 @@ ROLLOUT_ARGS=(
    --use-wandb
    --wandb-project slime-cispo-test
    --wandb-group cispo-h100-long-run
+)
+
+EVAL_ARGS=(
+   --eval-interval 20
+   --eval-prompt-data gsm8k /root/.cache/huggingface/datasets/sm8k/test.parquet
+   --n-samples-per-eval-prompt 1
+   --eval-max-response-len 4096
+   --eval-top-k 1
 )
 
 CISPO_ARGS=(
