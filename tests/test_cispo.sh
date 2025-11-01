@@ -53,13 +53,13 @@ ROLLOUT_ARGS=(
    --rollout-shuffle
    --rm-type math
    --num-rollout 200
-   --rollout-batch-size 2
+   --rollout-batch-size 4
    --n-samples-per-prompt 8
    --rollout-max-response-len 4096
    --rollout-temperature 1.0
 
-   --global-batch-size 16
-   --micro-batch-size 2
+   --global-batch-size 32
+   --micro-batch-size 4
 
    --use-wandb
    --wandb-project slime-cispo-test
