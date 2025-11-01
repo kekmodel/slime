@@ -477,8 +477,17 @@ def grade_answer_mathd(given_answer: str, ground_truth: str) -> bool:
 
 
 def extract_answer(passage: str) -> str:
+    """Extract answer from passage. Supports both \\boxed{} and #### formats."""
+    # Try LaTeX boxed format first
     if "\\boxed" in passage:
         return extract_boxed_answer(passage)
+
+    # Try GSM8K format (#### answer)
+    import re
+    match = re.search(r'####\s*(\S+)', passage)
+    if match:
+        return match.group(1)
+
     return None
 
 
