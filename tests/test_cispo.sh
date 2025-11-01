@@ -52,10 +52,10 @@ ROLLOUT_ARGS=(
    --apply-chat-template
    --rollout-shuffle
    --rm-type math
-   --num-rollout 100
-   --rollout-batch-size 4
-   --n-samples-per-prompt 4
-   --rollout-max-response-len 8192
+   --num-rollout 1000
+   --rollout-batch-size 2
+   --n-samples-per-prompt 8
+   --rollout-max-response-len 4096
    --rollout-temperature 1.0
 
    --global-batch-size 16
@@ -86,6 +86,7 @@ OPTIMIZER_ARGS=(
 
 SGLANG_ARGS=(
    --rollout-num-gpus-per-engine 1
+   --sglang-mem-fraction-static 0.7
    # Note: FP32 precision is automatically provided by Megatron
    # via --attention-softmax-in-fp32 and --accumulate-allreduce-grads-in-fp32
    # LM head log-probs are automatically upcast to FP32
