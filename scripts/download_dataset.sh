@@ -51,35 +51,35 @@ if [ ! -e "$LINK_DIR/gsm8k" ]; then
 fi
 
 # Download DAPO-Math-17k
-echo ""
-echo "[2/2] Downloading DAPO-Math-17k..."
-python3 -c "
-from datasets import load_dataset
-import os
+# echo ""
+# echo "[2/2] Downloading DAPO-Math-17k..."
+# python3 -c "
+# from datasets import load_dataset
+# import os
 
-cache_dir = os.environ.get('CACHE_DIR', '/root/.cache/huggingface/datasets')
-os.makedirs(f'{cache_dir}/dapo-math-17k', exist_ok=True)
+# cache_dir = os.environ.get('CACHE_DIR', '/root/.cache/huggingface/datasets')
+# os.makedirs(f'{cache_dir}/dapo-math-17k', exist_ok=True)
 
-# Download DAPO-Math-17k
-dataset = load_dataset('BytedTsinghua-SIA/DAPO-Math-17k', split='train')
+# # Download DAPO-Math-17k
+# dataset = load_dataset('BytedTsinghua-SIA/DAPO-Math-17k', split='train')
 
-# Save as jsonl to cache directory (original format)
-dataset.to_json(f'{cache_dir}/dapo-math-17k/dapo-math-17k.jsonl')
+# # Save as jsonl to cache directory (original format)
+# dataset.to_json(f'{cache_dir}/dapo-math-17k/dapo-math-17k.jsonl')
 
-print(f'✓ Downloaded {len(dataset)} DAPO-Math-17k samples')
-print(f'  Saved to: {cache_dir}/dapo-math-17k/dapo-math-17k.jsonl')
-print(f'  First sample keys: {list(dataset[0].keys())}')
-"
+# print(f'✓ Downloaded {len(dataset)} DAPO-Math-17k samples')
+# print(f'  Saved to: {cache_dir}/dapo-math-17k/dapo-math-17k.jsonl')
+# print(f'  First sample keys: {list(dataset[0].keys())}')
+# "
 
-# Create symlink
-if [ ! -e "$LINK_DIR/dapo-math-17k" ]; then
-    ln -s "$CACHE_DIR/dapo-math-17k" "$LINK_DIR/dapo-math-17k"
-    echo "  Created symlink: $LINK_DIR/dapo-math-17k -> $CACHE_DIR/dapo-math-17k"
-fi
+# # Create symlink
+# if [ ! -e "$LINK_DIR/dapo-math-17k" ]; then
+#     ln -s "$CACHE_DIR/dapo-math-17k" "$LINK_DIR/dapo-math-17k"
+#     echo "  Created symlink: $LINK_DIR/dapo-math-17k -> $CACHE_DIR/dapo-math-17k"
+# fi
 
-echo ""
-echo "=== Download complete ==="
-echo "  GSM8K: $CACHE_DIR/gsm8k/train.parquet"
-echo "  DAPO-Math-17k: $CACHE_DIR/dapo-math-17k/dapo-math-17k.jsonl"
-echo ""
-echo "Symlinks created in: $LINK_DIR"
+# echo ""
+# echo "=== Download complete ==="
+# echo "  GSM8K: $CACHE_DIR/gsm8k/train.parquet"
+# echo "  DAPO-Math-17k: $CACHE_DIR/dapo-math-17k/dapo-math-17k.jsonl"
+# echo ""
+# echo "Symlinks created in: $LINK_DIR"
