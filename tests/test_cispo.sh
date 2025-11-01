@@ -59,7 +59,7 @@ ROLLOUT_ARGS=(
    --rollout-temperature 1.0
 
    --global-batch-size 256
-   --micro-batch-size 8
+   --micro-batch-size 4
 
    --use-wandb
    --wandb-project slime-cispo-test
