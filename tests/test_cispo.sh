@@ -53,13 +53,13 @@ ROLLOUT_ARGS=(
    --rollout-shuffle
    --rm-type math
    --num-rollout 200
-   --rollout-batch-size 4
+   --rollout-batch-size 32
    --n-samples-per-prompt 8
    --rollout-max-response-len 4096
    --rollout-temperature 1.0
 
-   --global-batch-size 32
-   --micro-batch-size 4
+   --global-batch-size 256
+   --micro-batch-size 8
 
    --use-wandb
    --wandb-project slime-cispo-test
@@ -67,11 +67,11 @@ ROLLOUT_ARGS=(
 )
 
 EVAL_ARGS=(
-   --eval-interval 10
-   --eval-prompt-data gsm8k /root/.cache/huggingface/datasets/gsm8k/test.parquet
-   --n-samples-per-eval-prompt 1
-   --eval-max-response-len 4096
-   --eval-top-k 1
+   # --eval-interval 10
+   # --eval-prompt-data gsm8k /root/.cache/huggingface/datasets/gsm8k/test.parquet
+   # --n-samples-per-eval-prompt 1
+   # --eval-max-response-len 4096
+   # --eval-top-k 1
 )
 
 CISPO_ARGS=(
