@@ -4,15 +4,25 @@ set -e
 
 echo "=== Downloading datasets for slime ==="
 
-# Download GSM8K
+# Use cache volume for large datasets to avoid filling container disk
+CACHE_DIR="${CACHE_DIR:-/root/.cache/huggingface/datasets}"
+LINK_DIR="${LINK_DIR:-$(pwd)}"
+
+echo "Cache directory: $CACHE_DIR"
+echo "Link directory: $LINK_DIR"
 echo ""
+
+# Create cache directory
+mkdir -p "$CACHE_DIR"
+
+# Download GSM8K
 echo "[1/2] Downloading GSM8K..."
 python3 -c "
 from datasets import load_dataset
 import os
 
-# Create directory
-os.makedirs('gsm8k', exist_ok=True)
+cache_dir = os.environ.get('CACHE_DIR', '/root/.cache/datasets')
+os.makedirs(f'{cache_dir}/gsm8k', exist_ok=True)
 
 # Download GSM8K train split
 # Note: config name is 'main' for openai/gsm8k, 'default' for gsm8k
@@ -21,12 +31,19 @@ try:
 except:
     dataset = load_dataset('gsm8k', split='train')
 
-# Save as parquet
-dataset.to_parquet('gsm8k/train.parquet')
+# Save as parquet to cache directory
+dataset.to_parquet(f'{cache_dir}/gsm8k/train.parquet')
 
 print(f'✓ Downloaded {len(dataset)} GSM8K samples')
+print(f'  Saved to: {cache_dir}/gsm8k/train.parquet')
 print(f'  First sample keys: {list(dataset[0].keys())}')
 "
+
+# Create symlink
+if [ ! -e "$LINK_DIR/gsm8k" ]; then
+    ln -s "$CACHE_DIR/gsm8k" "$LINK_DIR/gsm8k"
+    echo "  Created symlink: $LINK_DIR/gsm8k -> $CACHE_DIR/gsm8k"
+fi
 
 # Download DAPO-Math-17k
 echo ""
@@ -35,20 +52,29 @@ python3 -c "
 from datasets import load_dataset
 import os
 
-# Create directory
-os.makedirs('dapo-math-17k', exist_ok=True)
+cache_dir = os.environ.get('CACHE_DIR', '/root/.cache/huggingface/datasets')
+os.makedirs(f'{cache_dir}/dapo-math-17k', exist_ok=True)
 
 # Download DAPO-Math-17k
 dataset = load_dataset('BytedTsinghua-SIA/DAPO-Math-17k', split='train')
 
-# Save as jsonl (original format)
-dataset.to_json('dapo-math-17k/dapo-math-17k.jsonl')
+# Save as jsonl to cache directory (original format)
+dataset.to_json(f'{cache_dir}/dapo-math-17k/dapo-math-17k.jsonl')
 
 print(f'✓ Downloaded {len(dataset)} DAPO-Math-17k samples')
+print(f'  Saved to: {cache_dir}/dapo-math-17k/dapo-math-17k.jsonl')
 print(f'  First sample keys: {list(dataset[0].keys())}')
 "
 
+# Create symlink
+if [ ! -e "$LINK_DIR/dapo-math-17k" ]; then
+    ln -s "$CACHE_DIR/dapo-math-17k" "$LINK_DIR/dapo-math-17k"
+    echo "  Created symlink: $LINK_DIR/dapo-math-17k -> $CACHE_DIR/dapo-math-17k"
+fi
+
 echo ""
 echo "=== Download complete ==="
-echo "  GSM8K: gsm8k/train.parquet"
-echo "  DAPO-Math-17k: dapo-math-17k/dapo-math-17k.jsonl"
+echo "  GSM8K: $CACHE_DIR/gsm8k/train.parquet"
+echo "  DAPO-Math-17k: $CACHE_DIR/dapo-math-17k/dapo-math-17k.jsonl"
+echo ""
+echo "Symlinks created in: $LINK_DIR"

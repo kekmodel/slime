@@ -25,7 +25,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 HF_MODEL="Qwen/Qwen3-0.6B"
 HF_CACHE_DIR="${HOME}/.cache/huggingface/hub"
-TORCH_DIST_DIR="/root/Qwen3-0.6B_torch_dist"
+TORCH_DIST_DIR="/root/.cache/huggingface/slime/Qwen3-0.6B_torch_dist"
 
 # Convert HF model to Megatron torch_dist format if not already converted
 if [ ! -d "${TORCH_DIST_DIR}" ]; then
