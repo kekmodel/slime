@@ -68,7 +68,7 @@ ROLLOUT_ARGS=(
 
    --use-wandb
    --wandb-project slime-cispo-test
-   --wandb-group gspo-h100-mean-only
+   --wandb-group gspo-h100-mean-std
 )
 
 EVAL_ARGS=(
@@ -81,7 +81,7 @@ EVAL_ARGS=(
 
 GSPO_ARGS=(
    --advantage-estimator gspo
-   --disable-grpo-std-normalization  # Dr. GRPO: mean-centering만 (binary reward에 최적)
+   # --disable-grpo-std-normalization  # Dr. GRPO: mean-centering만 (binary reward에 최적)
    --kl-loss-coef 0.00
    --kl-loss-type low_var_kl
    --kl-coef 0.00
