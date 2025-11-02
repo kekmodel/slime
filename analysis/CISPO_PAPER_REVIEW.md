@@ -299,26 +299,37 @@ train/entropy_loss  # Policy entropy
 
 1. **Ratio Truncation**: ratio > 5.0일 때 `pg_clipfrac` 증가 확인
 2. **Stop-Gradient**: 손실이 여전히 backpropagate (grad norm 확인)
-3. **Sequence-Level IS**: KL이 토큰당이 아닌 시퀀스당 평균인지 확인
+3. **Token-Level IS**: KL이 각 토큰별로 계산되는지 확인 (GRPO와 동일)
 
 ## 8. slime 구현과 논문의 잠재적 차이점
 
-### 8.1 Sequence-Level vs Token-Level IS
+### 8.1 Token-Level vs Sequence-Level IS
 
-**논문 언급**:
-> "We use sequence-level IS ratios averaged per sequence, not per token"
+**논문에 따르면 (MiniMax-M1, ScaleRL 모두 일치)**:
 
-**slime 구현 확인** (`loss.py:399-414`):
+| 알고리즘 | IS Ratio 계산 레벨 | 근거 |
+|---------|------------------|------|
+| **CISPO** | Token-level (각 토큰마다 개별 ratio) | `r_{i,t}` 표기, Eq. 4 |
+| **GSPO**  | Sequence-level (전체 시퀀스 평균 ratio) | ScaleRL Table 참조 |
+| **GRPO**  | Token-level (각 토큰마다 개별 ratio) | Token-level clipping |
 
-✅ **CISPO는 GSPO와 동일한 sequence-level IS 경로를 사용합니다**
+**중요**: MiniMax-M1 논문 Equation 4는 `r_{i,t}(θ)`로 명시적으로 **token-level** IS를 사용합니다:
+```
+𝒥_CISPO(θ) = 𝔼[1/∑|o_i| ∑_i ∑_t sg(r̂_{i,t}(θ)) Â_{i,t} log π_θ(o_{i,t})]
+```
+
+**slime 구현 수정** (`loss.py:397-399`):
+
+✅ **CISPO는 GRPO와 동일한 token-level IS 경로를 사용합니다**
 
 ```python
-if args.advantage_estimator in ["gspo", "cispo"]:
+# GSPO만 sequence-level 사용
+if args.advantage_estimator in ["gspo"]:
     # 1. 전체 시퀀스의 log-prob 수집
     full_log_probs = [all_gather_with_cp(...) for ...]
     full_old_log_probs = [all_gather_with_cp(...) for ...]
 
-    # 2. 시퀀스당 평균 KL 계산 (핵심!)
+    # 2. 시퀀스당 평균 KL 계산
     ppo_kl = [
         ((old_logprob - log_prob) * loss_mask).sum() /
         torch.clamp_min(loss_mask.sum(), 1)
@@ -329,16 +340,16 @@ if args.advantage_estimator in ["gspo", "cispo"]:
     ppo_kl = [kl.expand_as(log_prob) for kl, log_prob in ...]
 ```
 
-**PPO/GRPO와의 차이** (`loss.py:417-420`):
+**CISPO/GRPO/PPO 경로** (`loss.py:417-420`):
 ```python
-else:
+else:  # CISPO, GRPO, PPO
     # 토큰별 개별 KL (token-level IS)
     ppo_kl = old_log_probs - log_probs
 ```
 
 **핵심 차이**:
-- **CISPO/GSPO**: 한 시퀀스의 모든 토큰이 동일한 IS ratio 공유 → 낮은 확률 토큰도 평균에 희석됨
-- **PPO/GRPO**: 각 토큰이 고유 IS ratio → 낮은 확률 토큰이 개별적으로 클리핑됨
+- **GSPO**: 한 시퀀스의 모든 토큰이 동일한 IS ratio 공유 → 낮은 확률 토큰도 평균에 희석됨
+- **CISPO/GRPO**: 각 토큰이 고유 IS ratio → 낮은 확률 토큰이 개별적으로 처리됨 (CISPO는 stop-gradient로 보호)
 
 ### 8.2 현재 구현 상태
 
@@ -347,7 +358,7 @@ else:
 | Upper truncation only | ✅ | ✅ | 일치 |
 | Stop-gradient on ratio | ✅ | ✅ | 일치 |
 | eps_clip_high=5.0 | ✅ | ✅ | 일치 |
-| **Sequence-level IS** | ✅ | ✅ | **일치** (GSPO와 동일 경로) |
+| **Token-level IS** | ✅ | ✅ | **일치** (GRPO와 동일 경로) |
 | **Advantage normalization** | ✅ (Z-Score) | ✅ (Dr. GRPO) | **개선됨** (binary reward 최적화) |
 | **FP32 LM head** | ✅ | ✅ | **일치** (Megatron 기본 제공) |
 | Repetition detection | ✅ | ❓ | 확인 필요 |
@@ -429,13 +440,13 @@ else:
 
 ### 10.1 구현 상태
 
-✅ **slime의 CISPO 구현은 논문과 수학적으로 일치**
-✅ **Sequence-level IS 확인 완료** (GSPO와 동일한 경로, `loss.py:399-414`)
+✅ **slime의 CISPO 구현은 최신 ScaleRL 논문과 수학적으로 일치**
+✅ **Token-level IS 확인 완료** (GRPO와 동일한 경로, `loss.py:397-420`)
 ✅ **Stop-gradient 및 upper truncation 정확히 구현됨** (`ppo_utils.py:76-123`)
 ✅ **테스트 설정이 적절함** (`eps_clip_high=5.0`)
 ✅ **Dr. GRPO (Mean-Centering) 적용** (binary reward 최적화, `--disable-grpo-std-normalization`)
 ✅ **FP32 Precision 보장** (Megatron 기본 제공: `--attention-softmax-in-fp32`, `--accumulate-allreduce-grads-in-fp32`)
-✅ **프로덕션 준비 완료** (MiniMax가 456B 모델 학습에 사용)
+✅ **프로덕션 준비 완료** (ScaleRL 논문에서 100K GPU-hours 규모로 검증됨)
 
 ### 10.2 개선 사항
 
@@ -476,7 +487,9 @@ else:
 ---
 
 **문서 작성일**: 2025-10-30
-**최종 업데이트**: 2025-11-01 (Sequence-level IS 구현 확인 완료)
+**최종 업데이트**: 2025-11-02 (Token-level IS로 수정 완료 - ScaleRL 논문 기준)
 **리뷰어**: Claude Code
-**논문 버전**: v1 (2025년 6월)
+**참고 논문**:
+- MiniMax-M1 (arxiv:2506.13585v1)
+- ScaleRL (arxiv:2510.13786v1) - CISPO 상세 분석
 **slime 브랜치**: dev

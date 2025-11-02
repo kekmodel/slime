@@ -11,7 +11,7 @@ This directory contains research, analysis, and documentation for implementing R
   - Comparison with PPO, GRPO, DAPO
   - slime implementation verification
   - Test setup and validation metrics
-  - **Key findings**: Sequence-level IS, stop-gradient mechanism, FP32 LM head
+  - **Key findings**: Token-level IS (ScaleRL), stop-gradient mechanism, FP32 LM head
 
 - **[TESTING_CISPO.md](TESTING_CISPO.md)** (4.8KB)
   - Testing guide for CISPO implementation
@@ -101,7 +101,8 @@ This directory contains research, analysis, and documentation for implementing R
 |---------|------------|---------|-------|--------|
 | CISPO algorithm | ✅ | ❌ (uses GRPO) | ✅ | Verified |
 | GRPO (no KL) | ❌ | ✅ | ✅ | Verified |
-| Sequence-level IS | ✅ | ✅ | ✅ | Verified |
+| Token-level IS | ✅ (CISPO) | ✅ (GRPO) | ✅ | Verified |
+| Sequence-level IS | ❌ | ❌ | ✅ (GSPO only) | Verified |
 | Stop-gradient | ✅ (CISPO) | N/A | ✅ | Verified |
 | **Mean-centering** | ❌ (uses Z-Score) | ✅ | ✅ | **Production-proven** |
 | FP32 LM head | ✅ | ✅ | ✅ | Megatron built-in |
@@ -150,6 +151,6 @@ This directory contains research, analysis, and documentation for implementing R
 
 ---
 
-**Last Updated**: 2025-11-01
+**Last Updated**: 2025-11-02
 **Maintainer**: Claude Code
-**Latest Addition**: GLM-4.5 Production Review
+**Latest Addition**: CISPO Token-level IS 수정 (ScaleRL 논문 기준)
