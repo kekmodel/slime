@@ -394,9 +394,9 @@ def policy_loss_function(
 
     log_probs = log_probs_and_entropy["log_probs"]
 
-    # Compute KL divergence: GSPO and CISPO use sequence-level (per-sample average),
-    # while GRPO/PPO use token-level KL
-    if args.advantage_estimator in ["gspo", "cispo"]:
+    # Compute KL divergence: GSPO uses sequence-level (per-sample average),
+    # while CISPO/GRPO/PPO use token-level KL
+    if args.advantage_estimator in ["gspo"]:
         full_log_probs = [
             all_gather_with_cp(log_prob, total_length, response_length)
             for log_prob, total_length, response_length in zip(log_probs, total_lengths, response_lengths)
