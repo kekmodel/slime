@@ -239,6 +239,7 @@ Download FP8 model variant (e.g., `Qwen/Qwen3-4B-FP8`) and set:
 ### Advantage Estimators
 - GRPO (default): `--advantage-estimator grpo`
 - GSPO: `--advantage-estimator gspo`
+- CISPO: `--advantage-estimator cispo`
 - Reinforce++: `--advantage-estimator reinforce++`
 - PPO: `--advantage-estimator ppo`
 

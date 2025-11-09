@@ -23,7 +23,7 @@ The framework follows a three-module design:
 ## Key Features
 
 - High-performance RL training by combining Megatron-LM (training) with SGLang (inference)
-- Support for various RL algorithms: GRPO, GSPO, Reinforce++, PPO
+- Support for various RL algorithms: GRPO, GSPO, CISPO, Reinforce++, PPO
 - Flexible parallelism strategies (TP, PP, CP, EP, ETP)
 - Dynamic sampling and partial rollout for efficient data generation
 - Multi-turn interaction and agentic RL support
