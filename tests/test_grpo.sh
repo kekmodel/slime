@@ -84,7 +84,7 @@ EVAL_ARGS=(
 
 GRPO_ARGS=(
    --advantage-estimator grpo
-   --disable-grpo-std-normalization  # Dr. GRPO: mean-centering만 (binary reward에 최적)
+   --disable-grpo-std-normalization
    --use-kl-loss
    --kl-loss-coef 0.01
    --kl-loss-type low_var_kl
