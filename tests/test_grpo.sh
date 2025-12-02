@@ -81,9 +81,12 @@ EVAL_ARGS=(
 
 GRPO_ARGS=(
    --advantage-estimator grpo
-   # --disable-grpo-std-normalization  # Dr. GRPO: mean-centering만 (binary reward에 최적)
-   --kl-loss-coef 0.00
+   --disable-grpo-std-normalization  # Dr. GRPO: mean-centering만 (binary reward에 최적)
+   --use-kl-loss
+   --kl-loss-coef 0.01
    --kl-loss-type low_var_kl
+   # --kl-loss-type k3
+   # --use-unbiased-kl
    --kl-coef 0.00
    --entropy-coef 0.00
    --eps-clip 0.2
@@ -92,7 +95,7 @@ GRPO_ARGS=(
 
 OPTIMIZER_ARGS=(
    --optimizer adam
-   --lr 5e-7
+   --lr 1e-6
    --lr-decay-style constant
    --weight-decay 0.01
    --adam-beta1 0.9
