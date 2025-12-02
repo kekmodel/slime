@@ -15,7 +15,7 @@ pkill -9 python
 set -ex
 
 # Experiment config - change these for A/B testing
-EXP_NAME="unbiased-kl-baseline"  # or "unbiased-kl-enabled"
+EXP_NAME="unbiased-kl-enabled"  # or "unbiased-kl-enabled"
 
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=1
