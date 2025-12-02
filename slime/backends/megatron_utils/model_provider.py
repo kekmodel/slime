@@ -2,7 +2,7 @@
 import argparse
 import inspect
 from contextlib import nullcontext
-from typing import Literal, Optional
+from typing import Literal
 
 import torch
 from megatron.core import tensor_parallel
@@ -15,7 +15,6 @@ from megatron.core.models.gpt.gpt_layer_specs import (
 from megatron.core.transformer.spec_utils import import_module
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.training.arguments import core_transformer_config_from_args
-from slime.utils import profile_utils
 
 
 # Adapt from https://github.com/volcengine/verl/blob/c3b20575d2bc815fcccd84bddb4c0401fc4b632b/verl/models/llama/megatron/layers/parallel_linear.py#L82
@@ -40,8 +39,8 @@ class LinearForLastLayer(torch.nn.Linear):
     def forward(
         self,
         input_: torch.Tensor,
-        weight: Optional[torch.Tensor] = None,
-        runtime_gather_output: Optional[bool] = None,
+        weight: torch.Tensor | None = None,
+        runtime_gather_output: bool | None = None,
     ) -> tuple[torch.Tensor, None]:
         logits = super().forward(input_)
         logits = logits.float()
@@ -54,9 +53,7 @@ def get_model_provider_func(
     args: argparse.Namespace,
     role: Literal["actor", "critic"] = "actor",
 ):
-    def model_provider(
-        pre_process: bool = True, post_process: bool = True, vp_stage: Optional[int] = None
-    ) -> GPTModel:
+    def model_provider(pre_process: bool = True, post_process: bool = True, vp_stage: int | None = None) -> GPTModel:
         """Builds the model.
 
         If you set the use_legacy_models to True, it will return the legacy GPT model and if not the mcore GPT model.
@@ -70,10 +67,6 @@ def get_model_provider_func(
             Union[GPTModel, megatron.legacy.model.GPTModel]: The returned model
         """
         use_te = args.transformer_impl == "transformer_engine"
-
-        # TODO maybe move this to other parts
-        if args.record_memory_history:
-            profile_utils.attach_oom_dump_memory_history(profile_utils.get_memory_snapshot_full_path(args))
 
         # Experimental loading arguments from yaml
         config: TransformerConfig = core_transformer_config_from_args(args)
@@ -123,10 +116,10 @@ def get_model_provider_func(
                 # Check if fp8_model_init supports preserve_high_precision_init_val
                 if "preserve_high_precision_init_val" in inspect.signature(fp8_model_init).parameters:
                     build_model_context_args["preserve_high_precision_init_val"] = True
-            except Exception:
+            except Exception as e:
                 raise RuntimeError(
                     "--fp8-param-gather requires `fp8_model_init` from TransformerEngine, but not found."
-                )
+                ) from e
 
         kwargs = {
             "config": config,
