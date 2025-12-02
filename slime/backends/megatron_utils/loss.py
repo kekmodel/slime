@@ -524,10 +524,14 @@ def policy_loss_function(
     if args.use_kl_loss:
         ref_log_probs = batch["ref_log_probs"]
         ref_log_probs = torch.cat(ref_log_probs, dim=0)
+        importance_ratio = None
+        if args.use_unbiased_kl:
+            importance_ratio = torch.exp(log_probs - old_log_probs)
         kl = compute_approx_kl(
             log_probs,
             ref_log_probs,
             kl_loss_type=args.kl_loss_type,
+            importance_ratio=importance_ratio,
         )
         kl_loss = sum_of_sample_mean(kl)
 

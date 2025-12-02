@@ -729,6 +729,12 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 help="KL penalty coefficient for the loss function. This is added to the final PPO loss.",
             )
             parser.add_argument(
+                "--use-unbiased-kl",
+                action="store_true",
+                default=False,
+                help="Whether to enable unbiased KL estimation.",
+            )
+            parser.add_argument(
                 "--ref-update-interval",
                 type=int,
                 default=None,

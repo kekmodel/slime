@@ -665,10 +665,14 @@ class FSDPTrainRayActor(TrainRayActor):
 
         if self.args.use_kl_loss:
             ref_log_probs = torch.cat([batch["ref_log_probs"] for batch in unpacked_batches], dim=0)
+            importance_ratio = None
+            if self.args.use_unbiased_kl:
+                importance_ratio = torch.exp(log_probs - old_log_probs)
             kl = compute_approx_kl(
                 log_probs,
                 ref_log_probs,
                 kl_loss_type=self.args.kl_loss_type,
+                importance_ratio=importance_ratio,
             )
             kl_loss = sum_of_sample_mean(kl, response_lengths, loss_masks)
 

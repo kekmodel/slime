@@ -13,6 +13,7 @@ def compute_approx_kl(
     log_probs: torch.Tensor,
     log_probs_base: torch.Tensor,
     kl_loss_type: str,
+    importance_ratio: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
     Compute the approximate KL divergence between two distributions.
@@ -21,30 +22,34 @@ def compute_approx_kl(
     Args:
         log_probs: Log probabilities of the new distribution.
         log_probs_base: Log probabilities of the base distribution.
-        action_mask: Mask for actions.
+        kl_loss_type: Type of KL estimator (k1, k2, k3, low_var_kl).
+        importance_ratio: Optional IS ratio (π_θ/π_old) for unbiased KL estimation.
     """
 
     log_ratio = log_probs.float() - log_probs_base.float()
 
     if kl_loss_type == "k1":
-        return log_ratio
+        kl = log_ratio
     elif kl_loss_type == "k2":
-        log_ratio = log_probs.float() - log_probs_base.float()
-        log_ratio = log_ratio**2 / 2.0
-        return log_ratio
+        kl = log_ratio**2 / 2.0
     elif kl_loss_type == "k3":
         # The non negative kl approximation in
         # http://joschu.net/blog/kl-approx.html
         # Besides non negative, it is also unbiased and have lower variance.
         log_ratio = -log_ratio
-        log_ratio = log_ratio.exp() - 1 - log_ratio
-        return log_ratio
+        kl = log_ratio.exp() - 1 - log_ratio
     elif kl_loss_type == "low_var_kl":
         log_ratio = -log_ratio
-        log_ratio = log_ratio.exp() - 1 - log_ratio
-        return torch.clamp(log_ratio, min=-10, max=10)
+        kl = log_ratio.exp() - 1 - log_ratio
+        if importance_ratio is not None:
+            kl = importance_ratio * kl
+        return torch.clamp(kl, min=-10, max=10)
     else:
         raise ValueError(f"Unknown kl_loss_type: {kl_loss_type}")
+
+    if importance_ratio is not None:
+        kl = importance_ratio * kl
+    return kl
 
 
 def compute_opsm_mask(
