@@ -24,14 +24,9 @@ import os
 cache_dir = os.environ.get('CACHE_DIR', '/root/.cache/huggingface/datasets')
 os.makedirs(f'{cache_dir}/gsm8k', exist_ok=True)
 
-# Download GSM8K train split
-# Note: config name is 'main' for openai/gsm8k, 'default' for gsm8k
-try:
-    train_dataset = load_dataset('openai/gsm8k', 'main', split='train')
-    test_dataset = load_dataset('openai/gsm8k', 'main', split='test')
-except:
-    train_dataset = load_dataset('gsm8k', split='train')
-    test_dataset = load_dataset('gsm8k', split='test')
+# Download GSM8K from zhuzilin/gsm8k (pre-processed parquet format)
+train_dataset = load_dataset('zhuzilin/gsm8k', split='train')
+test_dataset = load_dataset('zhuzilin/gsm8k', split='test')
 
 # Save as parquet to cache directory
 train_dataset.to_parquet(f'{cache_dir}/gsm8k/train.parquet')
