@@ -14,6 +14,9 @@ pkill -9 python
 
 set -ex
 
+# Experiment config - change these for A/B testing
+EXP_NAME="unbiased-kl-baseline"  # or "unbiased-kl-enabled"
+
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=1
 
@@ -67,8 +70,8 @@ ROLLOUT_ARGS=(
    --micro-batch-size 1
 
    --use-wandb
-   --wandb-project slime-cispo-test
-   --wandb-group grpo-h100-mean-std
+   --wandb-project slime-unbiased-kl
+   --wandb-group ${EXP_NAME}
 )
 
 EVAL_ARGS=(
