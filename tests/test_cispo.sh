@@ -43,6 +43,7 @@ if [ ! -d "${TORCH_DIST_DIR}" ]; then
         --pipeline-model-parallel-size 1
 fi
 
+PROJECT_NAME="cispo-experiments"
 EXP_NAME="cispo-unbiased-kl-enabled"
 
 CKPT_ARGS=(
@@ -69,7 +70,7 @@ ROLLOUT_ARGS=(
    --micro-batch-size 1
 
    --use-wandb
-   --wandb-project slime-cispo-test
+   --wandb-project ${PROJECT_NAME}
    --wandb-group ${EXP_NAME}
 )
 
