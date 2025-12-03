@@ -43,6 +43,8 @@ if [ ! -d "${TORCH_DIST_DIR}" ]; then
         --pipeline-model-parallel-size 1
 fi
 
+EXP_NAME="cispo-unbiased-kl-enabled"
+
 CKPT_ARGS=(
    --hf-checkpoint ${HF_MODEL}
    --ref-load ${TORCH_DIST_DIR}
@@ -68,7 +70,7 @@ ROLLOUT_ARGS=(
 
    --use-wandb
    --wandb-project slime-cispo-test
-   --wandb-group cispo-mean-token-level-IS
+   --wandb-group ${EXP_NAME}
 )
 
 EVAL_ARGS=(
@@ -82,8 +84,10 @@ EVAL_ARGS=(
 CISPO_ARGS=(
    --advantage-estimator cispo
    --disable-grpo-std-normalization  # Dr. GRPO: mean-centering만 (binary reward에 최적)
-   --kl-loss-coef 0.00
+   --use-kl-loss
+   --kl-loss-coef 0.01
    --kl-loss-type low_var_kl
+   --use-unbiased-kl
    --kl-coef 0.00
    --entropy-coef 0.00
    --eps-clip-high 5.0
