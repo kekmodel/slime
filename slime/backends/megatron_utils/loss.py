@@ -437,11 +437,14 @@ def policy_loss_function(
 
     # Compute KL divergence (GSPO and Kimi use sequence-level KL, others use per-token KL)
     if args.advantage_estimator in ["gspo", "kimi"]:
+        # GSPO uses mean KL, Kimi uses sum KL (as in the paper)
+        use_mean = args.advantage_estimator == "gspo"
         ppo_kl = compute_gspo_kl(
             full_log_probs=full_log_probs,
             full_old_log_probs=full_old_log_probs,
             local_log_probs=log_probs,
             loss_masks=batch["loss_masks"],
+            use_mean=use_mean,
         )
         old_log_probs = torch.cat(old_log_probs, dim=0)
         log_probs = torch.cat(log_probs, dim=0)
