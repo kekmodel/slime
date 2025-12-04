@@ -57,7 +57,7 @@ if [ ! -d "${TORCH_DIST_DIR}" ]; then
 fi
 
 PROJECT_NAME="slime-kimi-test"
-EXP_NAME="gsm8k-cispo-eps-clip-1.0-5.0"
+EXP_NAME="gsm8k-cispo-eps-clip-0-5"
 
 CKPT_ARGS=(
    --hf-checkpoint ${HF_MODEL}

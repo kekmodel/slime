@@ -169,10 +169,10 @@ def compute_cispo_loss(
     eps_clip: float,
     eps_clip_high: float,
 ):
-    """Compute CISPO (Clipped Importance Sampling Policy Optimization) loss.
+    """Compute CISPO (Clipped IS-weight Policy Optimization) loss.
 
-    CISPO applies asymmetric clipping on the importance sampling ratio with
-    stop-gradient, preventing the ratio itself from being learned.
+    CISPO applies clipping on the importance sampling ratio with stop-gradient,
+    preventing the ratio itself from being learned.
 
     The key formula from MiniMax-M1 paper:
         ratio = exp(log π_current - log π_old)
@@ -182,14 +182,14 @@ def compute_cispo_loss(
     Note: log_probs is explicitly multiplied so gradient flows through it,
     while ratio_sg is detached to prevent learning the ratio itself.
 
-    For paper default [1.0, 5.0], use --eps-clip 1.0 --eps-clip-high 5.0
+    The paper only tunes eps_clip_high; eps_clip can be set to 0 to disable lower bound.
 
     Args:
         ppo_kl: Log-ratio (log π_old - log π_current) for each token
         log_probs: Current policy log probabilities (requires gradient)
         advantages: Advantage estimates for each token
-        eps_clip: Lower bound for ratio clipping (absolute value), typically 1.0
-        eps_clip_high: Upper bound for ratio clipping (absolute value), typically 5.0
+        eps_clip: Lower bound for ratio clipping (absolute value). Set to 0 to disable.
+        eps_clip_high: Upper bound for ratio clipping (absolute value)
 
     Returns:
         Tuple of (losses, clipfrac) where:
@@ -199,7 +199,7 @@ def compute_cispo_loss(
     # Compute importance sampling ratio: π_current / π_old
     ratio = (-ppo_kl).exp()
 
-    # Asymmetric clipping: [eps_clip, eps_clip_high] (absolute values)
+    # Clipping: [eps_clip, eps_clip_high] (absolute values)
     ratio_truncated = torch.clamp(ratio, min=eps_clip, max=eps_clip_high)
 
     # Stop-gradient: prevent the ratio from being learned (CISPO's key feature)
