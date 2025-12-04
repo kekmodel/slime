@@ -98,7 +98,7 @@ def compute_gspo_kl(
     full_old_log_probs: list[torch.Tensor],
     local_log_probs: list[torch.Tensor],
     loss_masks: list[torch.Tensor],
-    use_mean: bool = True,
+    reduction: str = "mean",
 ) -> torch.Tensor:
     """Compute GSPO-style per-sequence KL divergence.
 
@@ -107,25 +107,27 @@ def compute_gspo_kl(
         full_old_log_probs: Old policy log-probs per sample (full or CP-local).
         local_log_probs: Local (CP-local) log-probs for expansion shape reference.
         loss_masks: Loss masks per sample.
-        use_mean: If True, use mean KL (GSPO). If False, use sum KL (Kimi/K2 paper).
+        reduction: "mean" for GSPO (normalized by seq length), "sum" for Kimi/K2 paper.
 
     Returns:
         Concatenated tensor of per-token KL values where each token in a
         sequence has the same KL value (the sequence-level KL).
     """
     # Compute sequence-level KL and expand to per-token
-    if use_mean:
+    if reduction == "mean":
         # GSPO: mean KL (normalized by sequence length)
         ppo_kl = [
             ((old_logprob - log_prob) * loss_mask).sum() / torch.clamp_min(loss_mask.sum(), 1)
             for log_prob, old_logprob, loss_mask in zip(full_log_probs, full_old_log_probs, loss_masks, strict=False)
         ]
-    else:
+    elif reduction == "sum":
         # Kimi/K2: sum KL (as in the paper's log π_θ(y,z|x) = Σₜ log π_θ(aₜ|sₜ))
         ppo_kl = [
             ((old_logprob - log_prob) * loss_mask).sum()
             for log_prob, old_logprob, loss_mask in zip(full_log_probs, full_old_log_probs, loss_masks, strict=False)
         ]
+    else:
+        raise ValueError(f"Unknown reduction: {reduction}. Use 'mean' or 'sum'.")
     ppo_kl = [kl.expand_as(log_prob) for kl, log_prob in zip(ppo_kl, local_log_probs, strict=False)]
     ppo_kl = torch.cat(ppo_kl, dim=0)
 

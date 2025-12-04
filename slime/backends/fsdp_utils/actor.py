@@ -607,13 +607,13 @@ class FSDPTrainRayActor(TrainRayActor):
 
         if self.args.advantage_estimator in ["gspo", "kimi"]:
             # GSPO uses mean KL, Kimi uses sum KL (as in the paper)
-            use_mean = self.args.advantage_estimator == "gspo"
+            reduction = "mean" if self.args.advantage_estimator == "gspo" else "sum"
             ppo_kl = compute_gspo_kl(
                 full_log_probs=[batch["cur_log_probs"] for batch in unpacked_batches],
                 full_old_log_probs=[batch[old_log_prob_key] for batch in unpacked_batches],
                 local_log_probs=[batch["cur_log_probs"] for batch in unpacked_batches],
                 loss_masks=loss_masks,
-                use_mean=use_mean,
+                reduction=reduction,
             )
 
         if self.args.advantage_estimator == "kimi":
