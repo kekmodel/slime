@@ -57,7 +57,7 @@ ROLLOUT_ARGS=(
    --apply-chat-template
    --rollout-shuffle
    --rm-type math
-   --num-rollout 110
+   --num-rollout 111
    --rollout-batch-size 32
    --n-samples-per-prompt 8
    --rollout-max-response-len 4096
@@ -67,8 +67,8 @@ ROLLOUT_ARGS=(
    --micro-batch-size 1
 
    --use-wandb
-   --wandb-project slime-cispo-test
-   --wandb-group gspo-h100-mean-std
+   --wandb-project slime-kimi-test
+   --wandb-group gsm8k-kim-tau-1.0
 )
 
 EVAL_ARGS=(
