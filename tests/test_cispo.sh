@@ -56,8 +56,8 @@ if [ ! -d "${TORCH_DIST_DIR}" ]; then
         --pipeline-model-parallel-size 1
 fi
 
-PROJECT_NAME="cispo-experiments"
-EXP_NAME="cispo-unbiased-kl-enabled"
+PROJECT_NAME="slime-kimi-test"
+EXP_NAME="gsm8k-cispo"
 
 CKPT_ARGS=(
    --hf-checkpoint ${HF_MODEL}
@@ -73,7 +73,7 @@ ROLLOUT_ARGS=(
    --apply-chat-template
    --rollout-shuffle
    --rm-type math
-   --num-rollout 101
+   --num-rollout 111
    --rollout-batch-size 32
    --n-samples-per-prompt 8
    --rollout-max-response-len 4096
@@ -98,10 +98,10 @@ EVAL_ARGS=(
 CISPO_ARGS=(
    --advantage-estimator cispo
    --disable-grpo-std-normalization  # Dr. GRPO: mean-centering만 (binary reward에 최적)
-   --use-kl-loss
-   --kl-loss-coef 0.01
+   # --use-kl-loss
+   --kl-loss-coef 0.00
    --kl-loss-type low_var_kl
-   --use-unbiased-kl
+   # --use-unbiased-kl
    --kl-coef 0.00
    --entropy-coef 0.00
    --eps-clip-high 5.0
