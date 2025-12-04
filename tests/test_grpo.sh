@@ -34,6 +34,19 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 HF_MODEL="Qwen/Qwen3-0.6B"
 HF_CACHE_DIR="${HOME}/.cache/huggingface/hub"
 TORCH_DIST_DIR="/root/.cache/huggingface/slime/Qwen3-0.6B_torch_dist"
+DATASET_DIR="/root/.cache/huggingface/datasets/gsm8k"
+
+# Download dataset if not exists
+if [ ! -f "${DATASET_DIR}/train.parquet" ]; then
+    echo "Downloading datasets..."
+    bash "${REPO_ROOT}/scripts/download_dataset.sh"
+fi
+
+# Download model if not exists
+if [ ! -d "${HF_CACHE_DIR}/models--Qwen--Qwen3-0.6B" ]; then
+    echo "Downloading model..."
+    bash "${REPO_ROOT}/scripts/download_model.sh"
+fi
 
 # Convert HF model to Megatron torch_dist format if not already converted
 if [ ! -d "${TORCH_DIST_DIR}" ]; then
