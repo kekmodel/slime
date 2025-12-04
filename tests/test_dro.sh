@@ -57,7 +57,7 @@ if [ ! -d "${TORCH_DIST_DIR}" ]; then
 fi
 
 # Experiment config
-PROJECT_NAME="slime-dro-test"
+PROJECT_NAME="slime-kimi-test"
 EXP_NAME="gsm8k-dro-beta-0.5"
 
 CKPT_ARGS=(

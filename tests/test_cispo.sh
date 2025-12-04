@@ -104,8 +104,8 @@ CISPO_ARGS=(
    # --use-unbiased-kl
    --kl-coef 0.00
    --entropy-coef 0.00
-   --eps-clip 1.0      # lower bound (절대값, 논문 기본값)
-   --eps-clip-high 5.0 # upper bound (절대값, 논문 기본값)
+   --eps-clip 0.0      # lower bound (절대값)
+   --eps-clip-high 5.0 # upper bound (절대값)
 )
 
 OPTIMIZER_ARGS=(
