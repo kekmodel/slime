@@ -52,8 +52,8 @@ CKPT_ARGS=(
 
 ROLLOUT_ARGS=(
    --prompt-data /root/.cache/huggingface/datasets/gsm8k/train.parquet
-   --input-key question
-   --label-key answer
+   --input-key messages
+   --label-key label
    --apply-chat-template
    --rollout-shuffle
    --rm-type math
