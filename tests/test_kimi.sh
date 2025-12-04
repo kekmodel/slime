@@ -81,7 +81,7 @@ ROLLOUT_ARGS=(
 
    --use-wandb
    --wandb-project slime-kimi-test
-   --wandb-group gsm8k-kim-tau-1.0
+   --wandb-group gsm8k-kimi-sum-tau-1.0
 )
 
 EVAL_ARGS=(
