@@ -437,8 +437,7 @@ def policy_loss_function(
 
     # Compute KL divergence (GSPO and Kimi use sequence-level KL, others use per-token KL)
     if args.advantage_estimator in ["gspo", "kimi"]:
-        # GSPO uses mean KL, Kimi uses sum KL (as in the paper)
-        reduction = "mean" if args.advantage_estimator == "gspo" else "sum"
+        reduction = args.seq_kl_reduction if args.seq_kl_reduction is not None else "mean"
         ppo_kl = compute_gspo_kl(
             full_log_probs=full_log_probs,
             full_old_log_probs=full_old_log_probs,

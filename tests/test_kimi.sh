@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# GSPO test script for single GPU (H100) with Megatron backend
+# Kimi/K2 test script for single GPU (H100) with Megatron backend
 
 # for rerun the task
 pkill -9 sglang
@@ -92,9 +92,10 @@ EVAL_ARGS=(
    --eval-top-k 1
 )
 
-GSPO_ARGS=(
+KIMI_ARGS=(
    --advantage-estimator kimi
    --kimi-tau 1.0
+   --seq-kl-reduction sum
    --disable-grpo-std-normalization
    --kl-coef 0.00
    --entropy-coef 0.00
@@ -151,7 +152,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    ${ROLLOUT_ARGS[@]} \
    ${EVAL_ARGS[@]} \
    ${OPTIMIZER_ARGS[@]} \
-   ${GSPO_ARGS[@]} \
+   ${KIMI_ARGS[@]} \
    ${SGLANG_ARGS[@]} \
    ${MISC_ARGS[@]}
 

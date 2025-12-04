@@ -736,6 +736,14 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 help="Tau (τ) parameter for Kimi/K2 loss: (A - τ * log(π_θ/π_old))². Only used when --advantage-estimator kimi.",
             )
             parser.add_argument(
+                "--seq-kl-reduction",
+                type=str,
+                choices=["sum", "mean"],
+                default=None,
+                help="Sequence-level KL reduction for GSPO/Kimi. 'mean' (default) averages by seq length, "
+                "'sum' sums token KLs (Kimi/K2 paper style).",
+            )
+            parser.add_argument(
                 "--use-unbiased-kl",
                 action="store_true",
                 default=False,
