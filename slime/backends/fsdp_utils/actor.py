@@ -605,14 +605,12 @@ class FSDPTrainRayActor(TrainRayActor):
                 loss_masks=loss_masks,
             )
 
-        if self.args.advantage_estimator in ["gspo", "kimi"]:
-            reduction = self.args.seq_kl_reduction if self.args.seq_kl_reduction is not None else "mean"
+        if self.args.advantage_estimator == "gspo":
             ppo_kl = compute_gspo_kl(
                 full_log_probs=[batch["cur_log_probs"] for batch in unpacked_batches],
                 full_old_log_probs=[batch[old_log_prob_key] for batch in unpacked_batches],
                 local_log_probs=[batch["cur_log_probs"] for batch in unpacked_batches],
                 loss_masks=loss_masks,
-                reduction=reduction,
             )
 
         if self.args.advantage_estimator == "kimi":

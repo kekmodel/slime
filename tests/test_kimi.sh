@@ -81,7 +81,7 @@ ROLLOUT_ARGS=(
 
    --use-wandb
    --wandb-project slime-kimi-test
-   --wandb-group gsm8k-kimi-sum-tau-1.0
+   --wandb-group gsm8k-kimi-token-tau-1.0
 )
 
 EVAL_ARGS=(
@@ -95,7 +95,6 @@ EVAL_ARGS=(
 KIMI_ARGS=(
    --advantage-estimator kimi
    --kimi-tau 1.0
-   --seq-kl-reduction sum
    --disable-grpo-std-normalization
    --kl-coef 0.00
    --entropy-coef 0.00

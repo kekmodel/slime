@@ -406,8 +406,8 @@ def policy_loss_function(
 
     log_probs = log_probs_and_entropy["log_probs"]
 
-    # Pre-gather log probs if needed by OPSM, GSPO, or Kimi to avoid duplicate gathering
-    need_full_log_probs = args.use_opsm or args.advantage_estimator in ["gspo", "kimi"]
+    # Pre-gather log probs if needed by OPSM or GSPO to avoid duplicate gathering
+    need_full_log_probs = args.use_opsm or args.advantage_estimator == "gspo"
 
     full_log_probs = None
     full_old_log_probs = None
@@ -435,15 +435,13 @@ def policy_loss_function(
             loss_masks=batch["loss_masks"],
         )
 
-    # Compute KL divergence (GSPO and Kimi use sequence-level KL, others use per-token KL)
-    if args.advantage_estimator in ["gspo", "kimi"]:
-        reduction = args.seq_kl_reduction if args.seq_kl_reduction is not None else "mean"
+    # Compute KL divergence (GSPO uses sequence-level KL, others use per-token KL)
+    if args.advantage_estimator == "gspo":
         ppo_kl = compute_gspo_kl(
             full_log_probs=full_log_probs,
             full_old_log_probs=full_old_log_probs,
             local_log_probs=log_probs,
             loss_masks=batch["loss_masks"],
-            reduction=reduction,
         )
         old_log_probs = torch.cat(old_log_probs, dim=0)
         log_probs = torch.cat(log_probs, dim=0)
