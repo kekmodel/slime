@@ -25,30 +25,29 @@ def compute_approx_kl(
         kl_loss_type: Type of KL estimator (k1, k2, k3, low_var_kl).
         importance_ratio: Optional IS ratio (π_θ/π_old) for unbiased KL estimation.
     """
-
     log_ratio = log_probs.float() - log_probs_base.float()
 
     if kl_loss_type == "k1":
         kl = log_ratio
     elif kl_loss_type == "k2":
         kl = log_ratio**2 / 2.0
-    elif kl_loss_type == "k3":
+    elif kl_loss_type in ["k3", "low_var_kl"]:
         # The non negative kl approximation in
         # http://joschu.net/blog/kl-approx.html
         # Besides non negative, it is also unbiased and have lower variance.
         log_ratio = -log_ratio
         kl = log_ratio.exp() - 1 - log_ratio
-    elif kl_loss_type == "low_var_kl":
-        log_ratio = -log_ratio
-        kl = log_ratio.exp() - 1 - log_ratio
-        if importance_ratio is not None:
-            kl = importance_ratio * kl
-        return torch.clamp(kl, min=-10, max=10)
     else:
         raise ValueError(f"Unknown kl_loss_type: {kl_loss_type}")
 
+    # Apply IS ratio for unbiased KL estimation (DeepSeek-V3.2)
     if importance_ratio is not None:
         kl = importance_ratio * kl
+
+    # Clamp only for low_var_kl for numerical stability
+    if kl_loss_type == "low_var_kl":
+        kl = torch.clamp(kl, min=-10, max=10)
+
     return kl
 
 
