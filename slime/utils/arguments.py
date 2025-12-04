@@ -703,6 +703,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                     "gspo",
                     "cispo",
                     "kimi",
+                    "dro",
                     "reinforce_plus_plus",
                     "reinforce_plus_plus_baseline",
                     "ppo",
@@ -732,8 +733,14 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
             parser.add_argument(
                 "--kimi-tau",
                 type=float,
-                default=1.0,
-                help="Tau (τ) parameter for Kimi/K2 loss: (A - τ * log(π_θ/π_old))². Only used when --advantage-estimator kimi.",
+                default=0.5,
+                help="Tau (τ) parameter for Kimi/K2 loss: (A + τ * ppo_kl)². Default 0.5 is equivalent to DRO β=0.5.",
+            )
+            parser.add_argument(
+                "--dro-beta",
+                type=float,
+                default=0.5,
+                help="Beta (β) parameter for DRO loss: -log_p * A + (β/2) * ppo_kl². Default 0.5 is equivalent to Kimi τ=0.5.",
             )
             parser.add_argument(
                 "--use-unbiased-kl",

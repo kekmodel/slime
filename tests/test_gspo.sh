@@ -56,6 +56,10 @@ if [ ! -d "${TORCH_DIST_DIR}" ]; then
         --pipeline-model-parallel-size 1
 fi
 
+# Experiment config
+PROJECT_NAME="slime-gspo-test"
+EXP_NAME="gsm8k-gspo"
+
 CKPT_ARGS=(
    --hf-checkpoint ${HF_MODEL}
    --ref-load ${TORCH_DIST_DIR}
@@ -80,8 +84,8 @@ ROLLOUT_ARGS=(
    --micro-batch-size 1
 
    --use-wandb
-   --wandb-project slime-cispo-test
-   --wandb-group gspo-h100-mean-std
+   --wandb-project ${PROJECT_NAME}
+   --wandb-group ${EXP_NAME}
 )
 
 EVAL_ARGS=(

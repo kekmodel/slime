@@ -240,7 +240,7 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
             for i in range(len(log_probs))
         ]
 
-    if args.advantage_estimator in ["grpo", "gspo", "cispo", "kimi"]:
+    if args.advantage_estimator in ["grpo", "gspo", "cispo", "kimi", "dro"]:
         rewards = torch.tensor(rewards, dtype=torch.float32, device=kl[0].device)
         returns = get_grpo_returns(rewards, kl)
         # TODO: is the copy necessary?
@@ -456,8 +456,14 @@ def policy_loss_function(
         # ppo_kl = log(π_old) - log(π_θ)
         pg_loss = (advantages + args.kimi_tau * ppo_kl) ** 2
         pg_clipfrac = torch.zeros_like(pg_loss)
+    elif args.advantage_estimator == "dro":
+        # DRO loss: objective = log_p * A - (β/2)(log_p - log_q)²
+        # For minimization: loss = -log_p * A + (β/2) * ppo_kl²
+        # ppo_kl = log(π_old) - log(π_θ) = log_q - log_p
+        pg_loss = -log_probs * advantages + 0.5 * args.dro_beta * (ppo_kl ** 2)
+        pg_clipfrac = torch.zeros_like(pg_loss)
     elif args.advantage_estimator == "cispo":
-        pg_loss, pg_clipfrac = compute_cispo_loss(ppo_kl, log_probs, advantages, args.eps_clip_high)
+        pg_loss, pg_clipfrac = compute_cispo_loss(ppo_kl, log_probs, advantages, args.eps_clip, args.eps_clip_high)
     else:
         pg_loss, pg_clipfrac = compute_policy_loss(ppo_kl, advantages, args.eps_clip, args.eps_clip_high)
 

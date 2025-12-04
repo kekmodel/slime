@@ -14,9 +14,6 @@ pkill -9 python
 
 set -ex
 
-# Experiment config - change these for A/B testing
-EXP_NAME="unbiased-kl-enabled"  # or "unbiased-kl-enabled"
-
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=1
 
@@ -59,6 +56,10 @@ if [ ! -d "${TORCH_DIST_DIR}" ]; then
         --pipeline-model-parallel-size 1
 fi
 
+# Experiment config
+PROJECT_NAME="slime-grpo-test"
+EXP_NAME="gsm8k-grpo"
+
 CKPT_ARGS=(
    --hf-checkpoint ${HF_MODEL}
    --ref-load ${TORCH_DIST_DIR}
@@ -83,7 +84,7 @@ ROLLOUT_ARGS=(
    --micro-batch-size 1
 
    --use-wandb
-   --wandb-project slime-unbiased-kl
+   --wandb-project ${PROJECT_NAME}
    --wandb-group ${EXP_NAME}
 )
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Kimi/K2 test script for single GPU (H100) with Megatron backend
+# DRO (Direct Reward Optimization) test script for single GPU (H100) with Megatron backend
 
 # for rerun the task
 pkill -9 sglang
@@ -57,13 +57,13 @@ if [ ! -d "${TORCH_DIST_DIR}" ]; then
 fi
 
 # Experiment config
-PROJECT_NAME="slime-kimi-test"
-EXP_NAME="gsm8k-kimi-tau-0.5"
+PROJECT_NAME="slime-dro-test"
+EXP_NAME="gsm8k-dro-beta-0.5"
 
 CKPT_ARGS=(
    --hf-checkpoint ${HF_MODEL}
    --ref-load ${TORCH_DIST_DIR}
-   # --save /root/.cache/huggingface/slime/checkpoints/kimi-qwen3-0.6B
+   # --save /root/.cache/huggingface/slime/checkpoints/dro-qwen3-0.6B
    # --save-interval 10
 )
 
@@ -96,9 +96,9 @@ EVAL_ARGS=(
    --eval-top-k 1
 )
 
-KIMI_ARGS=(
-   --advantage-estimator kimi
-   --kimi-tau 0.5
+DRO_ARGS=(
+   --advantage-estimator dro
+   --dro-beta 0.5
    --disable-grpo-std-normalization
    --kl-coef 0.00
    --entropy-coef 0.00
@@ -155,7 +155,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    ${ROLLOUT_ARGS[@]} \
    ${EVAL_ARGS[@]} \
    ${OPTIMIZER_ARGS[@]} \
-   ${KIMI_ARGS[@]} \
+   ${DRO_ARGS[@]} \
    ${SGLANG_ARGS[@]} \
    ${MISC_ARGS[@]}
 

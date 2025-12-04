@@ -57,7 +57,7 @@ if [ ! -d "${TORCH_DIST_DIR}" ]; then
 fi
 
 PROJECT_NAME="slime-kimi-test"
-EXP_NAME="gsm8k-cispo"
+EXP_NAME="gsm8k-cispo-eps-clip-1.0-5.0"
 
 CKPT_ARGS=(
    --hf-checkpoint ${HF_MODEL}
@@ -104,7 +104,8 @@ CISPO_ARGS=(
    # --use-unbiased-kl
    --kl-coef 0.00
    --entropy-coef 0.00
-   --eps-clip-high 5.0
+   --eps-clip 1.0      # lower bound (절대값, 논문 기본값)
+   --eps-clip-high 5.0 # upper bound (절대값, 논문 기본값)
 )
 
 OPTIMIZER_ARGS=(

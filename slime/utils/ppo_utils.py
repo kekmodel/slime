@@ -166,27 +166,30 @@ def compute_cispo_loss(
     ppo_kl: torch.Tensor,
     log_probs: torch.Tensor,
     advantages: torch.Tensor,
+    eps_clip: float,
     eps_clip_high: float,
 ):
     """Compute CISPO (Clipped Importance Sampling Policy Optimization) loss.
 
-    CISPO applies upper truncation on the importance sampling ratio with
-    stop-gradient, preventing the ratio itself from being learned. This differs
-    from PPO which uses both upper and lower clipping without stop-gradient.
+    CISPO applies asymmetric clipping on the importance sampling ratio with
+    stop-gradient, preventing the ratio itself from being learned.
 
-    The key formula from the paper:
+    The key formula from MiniMax-M1 paper:
         ratio = exp(log π_current - log π_old)
-        ratio_truncated = min(ratio, ε_max)
+        ratio_truncated = clamp(ratio, eps_clip, eps_clip_high)
         loss = -sg(ratio_truncated) * advantages * log(π_current)
 
     Note: log_probs is explicitly multiplied so gradient flows through it,
     while ratio_sg is detached to prevent learning the ratio itself.
 
+    For paper default [1.0, 5.0], use --eps-clip 1.0 --eps-clip-high 5.0
+
     Args:
         ppo_kl: Log-ratio (log π_old - log π_current) for each token
         log_probs: Current policy log probabilities (requires gradient)
         advantages: Advantage estimates for each token
-        eps_clip_high: Upper bound for clipping (ε_max), typically 5.0 (absolute value)
+        eps_clip: Lower bound for ratio clipping (absolute value), typically 1.0
+        eps_clip_high: Upper bound for ratio clipping (absolute value), typically 5.0
 
     Returns:
         Tuple of (losses, clipfrac) where:
@@ -196,8 +199,8 @@ def compute_cispo_loss(
     # Compute importance sampling ratio: π_current / π_old
     ratio = (-ppo_kl).exp()
 
-    # Upper truncation: min(ratio, ε_max) where ε_max is absolute value
-    ratio_truncated = torch.clamp(ratio, max=eps_clip_high)
+    # Asymmetric clipping: [eps_clip, eps_clip_high] (absolute values)
+    ratio_truncated = torch.clamp(ratio, min=eps_clip, max=eps_clip_high)
 
     # Stop-gradient: prevent the ratio from being learned (CISPO's key feature)
     ratio_sg = ratio_truncated.detach()
