@@ -693,7 +693,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 type=str,
                 choices=["k1", "k2", "k3", "low_var_kl"],
                 default="k1",
-                help="Choose KL loss type: kl, k2, k3, low_var_kl",
+                help="Choose KL loss type: k1, k2, k3, low_var_kl",
             )
             parser.add_argument(
                 "--advantage-estimator",
@@ -702,6 +702,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                     "grpo",
                     "gspo",
                     "cispo",
+                    "kimi",
                     "reinforce_plus_plus",
                     "reinforce_plus_plus_baseline",
                     "ppo",
@@ -727,6 +728,12 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 type=float,
                 default=0.0,
                 help="KL penalty coefficient for the loss function. This is added to the final PPO loss.",
+            )
+            parser.add_argument(
+                "--kimi-tau",
+                type=float,
+                default=1.0,
+                help="Tau (τ) parameter for Kimi/K2 loss: (A - τ * log(π_θ/π_old))². Only used when --advantage-estimator kimi.",
             )
             parser.add_argument(
                 "--use-unbiased-kl",

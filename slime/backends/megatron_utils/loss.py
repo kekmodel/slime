@@ -240,7 +240,7 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
             for i in range(len(log_probs))
         ]
 
-    if args.advantage_estimator in ["grpo", "gspo", "cispo"]:
+    if args.advantage_estimator in ["grpo", "gspo", "cispo", "kimi"]:
         rewards = torch.tensor(rewards, dtype=torch.float32, device=kl[0].device)
         returns = get_grpo_returns(rewards, kl)
         # TODO: is the copy necessary?
@@ -406,8 +406,8 @@ def policy_loss_function(
 
     log_probs = log_probs_and_entropy["log_probs"]
 
-    # Pre-gather log probs if needed by OPSM or GSPO to avoid duplicate gathering
-    need_full_log_probs = args.use_opsm or args.advantage_estimator == "gspo"
+    # Pre-gather log probs if needed by OPSM, GSPO, or Kimi to avoid duplicate gathering
+    need_full_log_probs = args.use_opsm or args.advantage_estimator in ["gspo", "kimi"]
 
     full_log_probs = None
     full_old_log_probs = None
@@ -435,8 +435,8 @@ def policy_loss_function(
             loss_masks=batch["loss_masks"],
         )
 
-    # Compute KL divergence (GSPO uses sequence-level KL, others use per-token KL)
-    if args.advantage_estimator == "gspo":
+    # Compute KL divergence (GSPO and Kimi use sequence-level KL, others use per-token KL)
+    if args.advantage_estimator in ["gspo", "kimi"]:
         ppo_kl = compute_gspo_kl(
             full_log_probs=full_log_probs,
             full_old_log_probs=full_old_log_probs,
@@ -451,7 +451,12 @@ def policy_loss_function(
         ppo_kl = old_log_probs - log_probs
 
     # Compute policy loss: CISPO uses upper truncation with stop-gradient
-    if args.advantage_estimator == "cispo":
+    if args.advantage_estimator == "kimi":
+        # K2/Kimi loss: (A - τ * log(π_θ/π_old))² = (A + τ * ppo_kl)²
+        # ppo_kl = log(π_old) - log(π_θ)
+        pg_loss = (advantages + args.kimi_tau * ppo_kl) ** 2
+        pg_clipfrac = torch.zeros_like(pg_loss)
+    elif args.advantage_estimator == "cispo":
         pg_loss, pg_clipfrac = compute_cispo_loss(ppo_kl, log_probs, advantages, args.eps_clip_high)
     else:
         pg_loss, pg_clipfrac = compute_policy_loss(ppo_kl, advantages, args.eps_clip, args.eps_clip_high)
