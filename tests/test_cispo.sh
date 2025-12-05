@@ -57,7 +57,7 @@ if [ ! -d "${TORCH_DIST_DIR}" ]; then
 fi
 
 PROJECT_NAME="slime-kimi-test"
-EXP_NAME="gsm8k-cispo-true-IS-without-length-norm"
+EXP_NAME="gsm8k-cispo-nonzero_std-true-IS-without-length-norm"
 
 CKPT_ARGS=(
    --hf-checkpoint ${HF_MODEL}
@@ -78,6 +78,9 @@ ROLLOUT_ARGS=(
    --n-samples-per-prompt 8
    --rollout-max-response-len 4096
    --rollout-temperature 1.0
+   --over-sampling-batch-size 64
+   --dynamic-sampling-filter-path slime.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
+   --partial-rollout
 
    --global-batch-size 256
    --micro-batch-size 1
