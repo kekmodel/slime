@@ -57,7 +57,7 @@ if [ ! -d "${TORCH_DIST_DIR}" ]; then
 fi
 
 PROJECT_NAME="slime-kimi-test"
-EXP_NAME="gsm8k-cispo-eps-clip-0-5"
+EXP_NAME="gsm8k-cispo-true-IS-without-length-norm"
 
 CKPT_ARGS=(
    --hf-checkpoint ${HF_MODEL}
@@ -97,7 +97,9 @@ EVAL_ARGS=(
 
 CISPO_ARGS=(
    --advantage-estimator cispo
-   --disable-grpo-std-normalization  # Dr. GRPO: mean-centering만 (binary reward에 최적)
+   --disable-grpo-std-normalization
+   --use-rollout-logprobs  # 실제 rollout log_probs를 분모에 사용 (더 정확한 on-policy IS)
+   --calculate-per-token-loss  # length normalization 제거 (논문 권장)
    # --use-kl-loss
    --kl-loss-coef 0.00
    --kl-loss-type low_var_kl
