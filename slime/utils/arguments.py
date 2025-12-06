@@ -2,7 +2,7 @@ import argparse
 import json
 import logging
 import os
-from typing import Any, Dict
+from typing import Any
 
 import yaml
 from sglang_router.launch_router import RouterArgs
@@ -445,6 +445,12 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
             )
 
             parser.add_argument(
+                "--data-source-path",
+                type=str,
+                default="slime.rollout.data_source.RolloutDataSourceWithBuffer",
+                help="The data source class for rollout data.",
+            )
+            parser.add_argument(
                 "--prompt-data",
                 type=str,
                 default=None,
@@ -610,7 +616,9 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
             parser.add_argument("--eval-top-p", type=float, default=None)
             parser.add_argument("--eval-top-k", type=int, default=None)
             parser.add_argument("--eval-max-response-len", type=int, default=None)
+            parser.add_argument("--eval-max-prompt-len", type=int, default=None)
             parser.add_argument("--eval-min-new-tokens", type=int, default=None)
+            parser.add_argument("--eval-max-context-len", type=int, default=None)
 
             return parser
 
@@ -720,6 +728,12 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 help="KL penalty coefficient for the loss function. This is added to the final PPO loss.",
             )
             parser.add_argument(
+                "--use-unbiased-kl",
+                action="store_true",
+                default=False,
+                help="Whether to enable unbiased KL estimation.",
+            )
+            parser.add_argument(
                 "--ref-update-interval",
                 type=int,
                 default=None,
@@ -802,6 +816,18 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 action="store_true",
                 default=False,
                 help="The rollout routing replay technique from https://arxiv.org/abs/2510.11370",
+            )
+            parser.add_argument(
+                "--use-opsm",
+                action="store_true",
+                default=False,
+                help="Whether to enable Off-Policy Sequence Masking (OPSM).",
+            )
+            parser.add_argument(
+                "--opsm-delta",
+                type=float,
+                default=1e-4,
+                help="The threshold for Off-Policy Sequence Masking (OPSM).",
             )
             return parser
 
@@ -1106,6 +1132,12 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                     "Note: This attribute does not determine whether the sample participates in advantage normalization."
                 ),
             )
+            parser.add_argument(
+                "--disable-rollout-trim-samples",
+                action="store_true",
+                default=False,
+                help="disable trim samples in rollout buffer when converting samples to train data",
+            )
             return parser
 
         def add_custom_megatron_plugins_arguments(parser):
@@ -1163,6 +1195,16 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 type=float,
                 default=None,
             )
+            parser.add_argument(
+                "--ci-save-grad-norm",
+                type=str,
+                default=None,
+            )
+            parser.add_argument(
+                "--ci-load-grad-norm",
+                type=str,
+                default=None,
+            )
             return parser
 
         def add_sglang_tp_size():
@@ -1205,7 +1247,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 help="Path to the YAML config for custom function arguments.",
             )
             parser.add_argument("--padded-vocab-size", type=int, default=None)
-        except:
+        except argparse.ArgumentError:
             pass
 
         return parser
@@ -1280,7 +1322,7 @@ def _resolve_eval_datasets(args) -> list[EvalDatasetConfig]:
     Build evaluation dataset configurations from either --eval-config or --eval-prompt-data.
     """
     datasets_config = []
-    defaults: Dict[str, Any] = {}
+    defaults: dict[str, Any] = {}
 
     if args.eval_config:
         from omegaconf import OmegaConf
@@ -1309,7 +1351,7 @@ def _resolve_eval_datasets(args) -> list[EvalDatasetConfig]:
     else:
         datasets_config = []
 
-    eval_datasets = build_eval_dataset_configs(datasets_config, defaults)
+    eval_datasets = build_eval_dataset_configs(args, datasets_config, defaults)
     if eval_datasets:
         args.eval_prompt_data = [item for dataset in eval_datasets for item in (dataset.name, dataset.path)]
     else:
@@ -1368,7 +1410,7 @@ def slime_validate_args(args):
         ), "custom_tis_function_path must be set when get_mismatch_metrics is set"
 
         if args.use_rollout_logprobs:
-            print(
+            logger.info(
                 "get_mismatch_metrics is set; For metrics calculation, the log probs will still be recomputed by training engine. One more forward pass will be applied."
             )
 
@@ -1496,16 +1538,39 @@ def slime_validate_args(args):
         args.use_routing_replay = True
 
     if args.custom_config_path:
-        with open(args.custom_config_path, "r") as f:
+        with open(args.custom_config_path) as f:
             data = yaml.safe_load(f) or {}
         for k, v in data.items():
             if hasattr(args, k):
                 logger.info(f"Warning: Argument {k} is already set to {getattr(args, k)}, will override with {v}.")
             setattr(args, k, v)
 
+    if args.rollout_max_context_len is None:
+        logger.info(
+            f"args.rollout_max_context_len is not set. Use args.rollout_max_response_len {args.rollout_max_response_len} as default value."
+        )
+        args.rollout_max_context_len = args.rollout_max_response_len
+
+    if args.eval_max_context_len is None:
+        logger.info(
+            f"args.eval_max_context_len is not set. Use args.rollout_max_context_len {args.rollout_max_context_len} as default value."
+        )
+        args.eval_max_context_len = args.rollout_max_context_len
+
+    if args.rollout_max_prompt_len is None:
+        logger.info(
+            f"args.rollout_max_prompt_len is not set. Use args.rollout_max_context_len - 1 ({args.rollout_max_context_len} - 1) as default value so that there is at least one generated token to compute loss."
+        )
+        args.rollout_max_prompt_len = args.rollout_max_context_len - 1
+
+    assert (
+        args.rollout_max_prompt_len <= args.rollout_max_context_len - 1
+    ), f"args.rollout_max_prompt_len ({args.rollout_max_prompt_len}) must be smaller than args.rollout_max_context_len ({args.rollout_max_context_len}) so that there is at least one generated token to compute loss."
+
 
 def hf_validate_args(args, hf_config):
-    equal = lambda x, y: x == y
+    def equal(x, y):
+        return x == y
 
     errors = []
 
@@ -1526,10 +1591,10 @@ def hf_validate_args(args, hf_config):
                 )
 
     if len(errors) > 0:
-        raise AssertionError(f"hf_validate_args failed: " + "; ".join(errors))
+        raise AssertionError("hf_validate_args failed: " + "; ".join(errors))
 
 
-def _validate_and_update_megatron_args_from_hf(args, args_from_hf_config: Dict[str, Any]):
+def _validate_and_update_megatron_args_from_hf(args, args_from_hf_config: dict[str, Any]):
     for key, value in args_from_hf_config.items():
         if hasattr(args, key) and getattr(args, key) != value:
             raise ValueError(
