@@ -10,13 +10,20 @@ ALL_DATA_MAPPINGS = {"retail": ["train", "test", "dev"], "airline": ["test"]}
 
 def main():
     parser = argparse.ArgumentParser(description="Tau1 Mock Script")
-    parser.add_argument("--local_dir", required=True, help="Path to the local directory")
+    parser.add_argument(
+        "--local_dir", required=True, help="Path to the local directory"
+    )
     args = parser.parse_args()
 
     local_dir = args.local_dir
     if not os.path.isdir(local_dir):
         os.makedirs(local_dir)
-    config = RunConfig(model_provider="mock", user_model_provider="mock", user_strategy="human", model="mock")
+    config = RunConfig(
+        model_provider="mock",
+        user_model_provider="mock",
+        user_strategy="human",
+        model="mock",
+    )
     for env, split in ALL_DATA_MAPPINGS.items():
         for s in split:
             config.env = env
@@ -31,8 +38,12 @@ def main():
             with open(output_path, "w") as f:
                 for i, task in enumerate(env_instance.tasks):
                     row = {"index": i, "metadata": task.model_dump()}
-                    f.write(json.dumps(row) + "\n")  # <-- one JSON object per line
-            print(f"Saved preprocessed task indices for {env} ({s}) to {output_path}")
+                    f.write(
+                        json.dumps(row) + "\n"
+                    )  # <-- one JSON object per line
+            print(
+                f"Saved preprocessed task indices for {env} ({s}) to {output_path}"
+            )
 
 
 if __name__ == "__main__":
