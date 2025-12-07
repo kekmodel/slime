@@ -1,7 +1,15 @@
 # Turn: 3, Reward: 0.0, Terminated: False
 ============================================================
 
-<|im_start|>system
+<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.
+Knowledge cutoff: 2024-06
+Current date: 2025-12-07
+
+Reasoning: medium
+
+# Valid channels: analysis, commentary, final. Channel must be included for every message.
+Calls to these tools must go to the commentary channel: 'functions'.<|end|><|start|>developer<|message|># Instructions
+
 <main_policy>
 # Telecom Agent Policy
 
@@ -374,104 +382,159 @@ If `check_app_permissions(app_name="messaging")` shows "storage" and "sms" permi
 
 # Tools
 
-You may call one or more functions to assist with the user query.
+## functions
 
-You are provided with function signatures within <tools></tools> XML tags:
-<tools>
-{"type": "function", "function": {"name": "get_customer_by_phone", "description": "Finds a customer by their primary contact or line phone number.", "parameters": {"properties": {"phone_number": {"description": "The phone number to search for.", "title": "Phone Number", "type": "string"}}, "required": ["phone_number"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "get_customer_by_id", "description": "Retrieves a customer directly by their unique ID.", "parameters": {"properties": {"customer_id": {"description": "The unique identifier of the customer.", "title": "Customer Id", "type": "string"}}, "required": ["customer_id"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "get_customer_by_name", "description": "Searches for customers by name and DOB. May return multiple matches if names are similar,\n\nDOB helps disambiguate.", "parameters": {"properties": {"full_name": {"description": "The full name of the customer.", "title": "Full Name", "type": "string"}, "dob": {"description": "Date of birth for verification, in the format YYYY-MM-DD.", "title": "Dob", "type": "string"}}, "required": ["full_name", "dob"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "get_details_by_id", "description": "Retrieves the details for a given ID.\n\nThe ID must be a valid ID for a Customer, Line, Device, Bill, or Plan.", "parameters": {"properties": {"id": {"description": "The ID of the object to retrieve.", "title": "Id", "type": "string"}}, "required": ["id"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "suspend_line", "description": "Suspends a specific line (max 6 months).\n\nChecks: Line status must be Active.\nLogic: Sets line status to Suspended, records suspension_start_date.", "parameters": {"properties": {"customer_id": {"description": "ID of the customer who owns the line.", "title": "Customer Id", "type": "string"}, "line_id": {"description": "ID of the line to suspend.", "title": "Line Id", "type": "string"}, "reason": {"description": "Reason for suspension.", "title": "Reason", "type": "string"}}, "required": ["customer_id", "line_id", "reason"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "resume_line", "description": "Resumes a suspended line.\n\nChecks: Line status must be Suspended or Pending Activation.\nLogic: Sets line status to Active, clears suspension_start_date.", "parameters": {"properties": {"customer_id": {"description": "ID of the customer who owns the line.", "title": "Customer Id", "type": "string"}, "line_id": {"description": "ID of the line to resume.", "title": "Line Id", "type": "string"}}, "required": ["customer_id", "line_id"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "get_bills_for_customer", "description": "Retrieves a list of the customer's bills, most recent first.", "parameters": {"properties": {"customer_id": {"description": "ID of the customer.", "title": "Customer Id", "type": "string"}, "limit": {"default": 12, "description": "Maximum number of bills to return.", "title": "Limit", "type": "integer"}}, "required": ["customer_id"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "send_payment_request", "description": "Sends a payment request to the customer for a specific bill.\n\nChecks:\n    - Customer exists\n    - Bill exists and belongs to the customer\n    - No other bills are already awaiting payment for this customer\nLogic: Sets bill status to AWAITING_PAYMENT and notifies customer.\nWarning: This method does not check if the bill is already PAID.\nAlways check the bill status before calling this method.", "parameters": {"properties": {"customer_id": {"description": "ID of the customer who owns the bill.", "title": "Customer Id", "type": "string"}, "bill_id": {"description": "ID of the bill to send payment request for.", "title": "Bill Id", "type": "string"}}, "required": ["customer_id", "bill_id"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "get_data_usage", "description": "Retrieves current billing cycle data usage for a line, including data\n\nrefueling amount, data limit, and cycle end date.", "parameters": {"properties": {"customer_id": {"description": "ID of the customer who owns the line.", "title": "Customer Id", "type": "string"}, "line_id": {"description": "ID of the line to check usage for.", "title": "Line Id", "type": "string"}}, "required": ["customer_id", "line_id"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "enable_roaming", "description": "Enables international roaming on a line.", "parameters": {"properties": {"customer_id": {"description": "ID of the customer who owns the line.", "title": "Customer Id", "type": "string"}, "line_id": {"description": "ID of the line to enable roaming for.", "title": "Line Id", "type": "string"}}, "required": ["customer_id", "line_id"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "disable_roaming", "description": "Disables international roaming on a line.", "parameters": {"properties": {"customer_id": {"description": "ID of the customer who owns the line.", "title": "Customer Id", "type": "string"}, "line_id": {"description": "ID of the line to disable roaming for.", "title": "Line Id", "type": "string"}}, "required": ["customer_id", "line_id"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "transfer_to_human_agents", "description": "Transfer the user to a human agent, with a summary of the user's issue.\n\nOnly transfer if\n -  the user explicitly asks for a human agent\n -  given the policy and the available tools, you cannot solve the user's issue.", "parameters": {"properties": {"summary": {"description": "A summary of the user's issue.", "title": "Summary", "type": "string"}}, "required": ["summary"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "refuel_data", "description": "Refuels data for a specific line, adding to the customer's bill.\n\nChecks: Line status must be Active, Customer owns the line.\nLogic: Adds data to the line and charges customer based on the plan's refueling rate.", "parameters": {"properties": {"customer_id": {"description": "ID of the customer who owns the line.", "title": "Customer Id", "type": "string"}, "line_id": {"description": "ID of the line to refuel data for.", "title": "Line Id", "type": "string"}, "gb_amount": {"description": "Amount of data to add in gigabytes.", "title": "Gb Amount", "type": "number"}}, "required": ["customer_id", "line_id", "gb_amount"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "done", "description": "Call this function when you have completed the task and the customer is satisfied.", "parameters": {"type": "object", "properties": {}}}}
-</tools>
+namespace functions {
 
-For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
-<tool_call>
-{"name": <function-name>, "arguments": <args-json-object>}
-</tool_call><|im_end|>
-<|im_start|>user
-Hi there! Thank you for reaching out. My name is John Smith, and my phone number is 555-123-2002.
+// Finds a customer by their primary contact or line phone number.
+type get_customer_by_phone = (_: {
+// The phone number to search for.
+phone_number: string,
+}) => any;
 
-I'm currently abroad in France, and I'm experiencing significant issues with my mobile data connection. The problem is that my data is either stopping working entirely or running extremely slowly. I absolutely need to get this fixed because I need excellent internet speed on my phone for my work. I don't have access to WiFi, so I'm completely dependent on my mobile data connection right now.
+// Retrieves a customer directly by their unique ID.
+type get_customer_by_id = (_: {
+// The unique identifier of the customer.
+customer_id: string,
+}) => any;
 
-Can you help me diagnose and resolve this issue?<|im_end|>
-<|im_start|>assistant
-<think>
-The user is John Smith with phone number 555-123-2002, and he's having mobile data issues while abroad in France. Let me identify the customer first using their phone number.
+// Searches for customers by name and DOB. May return multiple matches if names are similar,
 
-Let me call the get_customer_by_phone function to retrieve their customer information.
-</think>
+DOB helps disambiguate.
+type get_customer_by_name = (_: {
+// The full name of the customer.
+full_name: string,
+// Date of birth for verification, in the format YYYY-MM-DD.
+dob: string,
+}) => any;
 
-Hello John! Thank you for reaching out. I understand how critical this is for your work. I'll help you diagnose and resolve your mobile data issue right away.
+// Retrieves the details for a given ID.
 
-Let me first retrieve your account information.
-<tool_call>
-{"name": "get_customer_by_phone", "arguments": {"phone_number": "555-123-2002"}}
-</tool_call><|im_end|>
-<|im_start|>user
-<tool_response>
-{"customer_id": "C1001", "full_name": "John Smith", "date_of_birth": "1985-06-15", "email": "john.smith@example.com", "phone_number": "555-123-2002", "address": {"street": "123 Main St", "city": "Anytown", "state": "CA", "zip_code": "90210"}, "account_status": "Active", "payment_methods": [{"method_type": "Credit Card", "account_number_last_4": "1235", "expiration_date": "12/2026"}], "line_ids": ["L1001", "L1002", "L1003"], "bill_ids": ["B1001", "B1002", "B1003"], "created_at": "2025-01-15 10:30:00", "last_extension_date": null, "goodwill_credit_used_this_year": 25.0}
-</tool_response><|im_end|>
-<|im_start|>assistant
-<think>
-Good, I found the customer. Now I need to troubleshoot the mobile data issue. Since the user is abroad in France, this is very likely a roaming issue. According to the tech support policy, I should:
+The ID must be a valid ID for a Customer, Line, Device, Bill, or Plan.
+type get_details_by_id = (_: {
+// The ID of the object to retrieve.
+id: string,
+}) => any;
 
-1. First check if there are any basic connectivity issues (Airplane Mode, mobile data enabled, etc.)
-2. Check for roaming issues since they're abroad
-3. Check data plan limits
-4. Check other potential issues like Data Saver mode, VPN, network mode preferences
+// Suspends a specific line (max 6 months).
 
-However, I realize I don't have a tool to directly check the device status. The tech support policy mentions various diagnostic actions like `check_status_bar()`, `check_network_status()`, `check_data_restriction_status()`, etc., but these seem to be actions the USER can perform on their device, not something I can call directly.
+Checks: Line status must be Active.
+Logic: Sets line status to Suspended, records suspension_start_date.
+type suspend_line = (_: {
+// ID of the customer who owns the line.
+customer_id: string,
+// ID of the line to suspend.
+line_id: string,
+// Reason for suspension.
+reason: string,
+}) => any;
 
-Let me re-read the policy... Yes, looking at the tech_support_policy section "What the user can do on their device", these are actions the user must perform. I guide the user through these steps.
+// Resumes a suspended line.
 
-Given that the user is abroad in France and experiencing data issues, the most likely causes are:
-1. Data Roaming is turned OFF on their phone
-2. The line is not roaming enabled
+Checks: Line status must be Suspended or Pending Activation.
+Logic: Sets line status to Active, clears suspension_start_date.
+type resume_line = (_: {
+// ID of the customer who owns the line.
+customer_id: string,
+// ID of the line to resume.
+line_id: string,
+}) => any;
 
-Let me start by checking if the line has roaming enabled. But first, I should ask the user to perform some diagnostic actions to understand their current status.
+// Retrieves a list of the customer's bills, most recent first.
+type get_bills_for_customer = (_: {
+// ID of the customer.
+customer_id: string,
+// Maximum number of bills to return.
+limit?: number, // default: 12,
+}) => any;
 
-Actually, let me think about this differently. The user is abroad, so:
-1. I should check if their line has roaming enabled (I can do this with account information)
-2. I should guide them through checking their phone's settings
+// Sends a payment request to the customer for a specific bill.
 
-Let me first get the details of their line to see if roaming is enabled. The user has multiple lines (L1001, L1002, L1003). I should probably ask which line they're using, but since they called with the main phone number, it's likely the primary line L1001.
+Checks:
+    - Customer exists
+    - Bill exists and belongs to the customer
+    - No other bills are already awaiting payment for this customer
+Logic: Sets bill status to AWAITING_PAYMENT and notifies customer.
+Warning: This method does not check if the bill is already PAID.
+Always check the bill status before calling this method.
+type send_payment_request = (_: {
+// ID of the customer who owns the bill.
+customer_id: string,
+// ID of the bill to send payment request for.
+bill_id: string,
+}) => any;
 
-Let me get the line details first to check roaming status.
-</think>
+// Retrieves current billing cycle data usage for a line, including data
 
-Great! I've found your account. I can see you have multiple lines. Since you're experiencing data issues while abroad in France, this is likely a **roaming-related problem**. Let me help you troubleshoot this systematically.
+refueling amount, data limit, and cycle end date.
+type get_data_usage = (_: {
+// ID of the customer who owns the line.
+customer_id: string,
+// ID of the line to check usage for.
+line_id: string,
+}) => any;
 
-First, I need to check if your line has roaming enabled. Let me retrieve the details of your line:
-<tool_call>
-{"name": "get_details_by_id", "arguments": {"id": "L1001"}}
-</tool_call><|im_end|>
-<|im_start|>user
-<tool_response>
-{"line_id": "L1001", "phone_number": "555-123-2001", "status": "Active", "plan_id": "P1001", "device_id": "D1001", "data_used_gb": 3.2, "data_refueling_gb": 0.0, "roaming_enabled": false, "contract_end_date": "2026-12-31", "last_plan_change_date": "2025-01-10", "last_sim_replacement_date": null, "suspension_start_date": null}
-</tool_response><|im_end|>
-<|im_start|>assistant
-<think>
-Perfect! I found the issue - the line L1001 has `roaming_enabled: false`. This is the primary reason why the user is experiencing data issues abroad in France. 
+// Enables international roaming on a line.
+type enable_roaming = (_: {
+// ID of the customer who owns the line.
+customer_id: string,
+// ID of the line to enable roaming for.
+line_id: string,
+}) => any;
 
-According to the policy:
-"If a user is traveling outside their home network, you should check if the line is roaming enabled. If it is not, you should enable it at no cost for the user."
+// Disables international roaming on a line.
+type disable_roaming = (_: {
+// ID of the customer who owns the line.
+customer_id: string,
+// ID of the line to disable roaming for.
+line_id: string,
+}) => any;
 
-So I should enable roaming for this line. However, I should also verify if this is the correct line the user is using. Let me inform them of the issue and enable roaming.
-</think>
+// Transfer the user to a human agent, with a summary of the user's issue.
 
-Perfect! I've found the issue. Your line (555-123-2001) **does not have roaming enabled**, which is why you're experiencing data problems while in France. This is the primary cause of your connectivity issue.
+Only transfer if
+ -  the user explicitly asks for a human agent
+ -  given the policy and the available tools, you cannot solve the user's issue.
+type transfer_to_human_agents = (_: {
+// A summary of the user's issue.
+summary: string,
+}) => any;
 
-The good news is that I can enable roaming for you **at no additional cost**. Let me do that right now:
-<tool_call>
-{"name": "enable_roaming", "arguments": {"customer_id": "C1001", "line_id": "L1001"}}
-</tool_call><|im_end|>
+// Refuels data for a specific line, adding to the customer's bill.
+
+Checks: Line status must be Active, Customer owns the line.
+Logic: Adds data to the line and charges customer based on the plan's refueling rate.
+type refuel_data = (_: {
+// ID of the customer who owns the line.
+customer_id: string,
+// ID of the line to refuel data for.
+line_id: string,
+// Amount of data to add in gigabytes.
+gb_amount: number,
+}) => any;
+
+// Call this function when you have completed the task and the customer is satisfied.
+type done = () => any;
+
+} // namespace functions<|end|><|start|>user<|message|>Hi there! Thanks for picking up. My name is John Smith, and I'm calling about my mobile data service. I'm currently abroad in France, and my mobile data has been really problematic lately. It either stops working entirely or it's incredibly slow, and it's making it very difficult to stay connected.
+
+I need to get this fixed because I absolutely need excellent internet speed on my phone. I don't have access to Wi-Fi, so my mobile data is critical. I'm not willing to accept anything less than excellent speed - if it's poor, fair, or just good, that won't work for me.
+
+Can you help me troubleshoot this? My phone number is 555-123-2002.<|end|><|start|>assistant to=functions.get_customer_by_phone<|channel|>commentary json<|message|>"{\"phone_number\": \"555-123-2002\"}"<|call|><|start|>functions.get_customer_by_phone to=assistant<|channel|>commentary<|message|>"{\"customer_id\": \"C1001\", \"full_name\": \"John Smith\", \"date_of_birth\": \"1985-06-15\", \"email\": \"john.smith@example.com\", \"phone_number\": \"555-123-2002\", \"address\": {\"street\": \"123 Main St\", \"city\": \"Anytown\", \"state\": \"CA\", \"zip_code\": \"90210\"}, \"account_status\": \"Active\", \"payment_methods\": [{\"method_type\": \"Credit Card\", \"account_number_last_4\": \"1235\", \"expiration_date\": \"12/2026\"}], \"line_ids\": [\"L1001\", \"L1002\", \"L1003\"], \"bill_ids\": [\"B1001\", \"B1002\", \"B1003\"], \"created_at\": \"2025-01-15 10:30:00\", \"last_extension_date\": null, \"goodwill_credit_used_this_year\": 25.0}"<|end|><|start|>assistant<|channel|>final<|message|>Perfect, John! I've found your account. I can see you have an active account with us. Now let me help you resolve this mobile data issue.
+
+Since you're traveling in France and experiencing mobile data problems, this is likely related to data roaming. Let me start by asking a few clarifying questions:
+
+**Which line are you using for mobile data in France?** I see you have multiple lines on your account (L1001, L1002, and L1003). Is 555-123-2002 the number you're using abroad, or are you using a different line?
+
+Once you confirm, I'll check your roaming status and then guide you through some diagnostic steps to identify the root cause. We'll need to check a few things on your device to understand what's happening with your connection.<|end|><|start|>user<|message|>Yes, 555-123-2002 is the line I'm using here in France. That's the one having all the mobile data issues. I'm currently relying on that line for all my connectivity while I'm abroad, so getting it fixed is really urgent for me.
+
+What do you need to check next?<|end|><|start|>assistant<|channel|>analysis<|message|>Great, thanks for confirming, John. Let me quickly check which of your line IDs corresponds to 555-123-2002, and then I'll verify your roaming status. After that, I'll need to run some diagnostics on your device.
+
+The user has confirmed they're using the phone number 555-123-2002 in France and experiencing mobile data issues. They need excellent internet speeds and this is urgent.
+
+Let me look at what I need to check:
+1. First, I should verify which line ID is associated with 555-123-2002. The customer has line IDs L1001, L1002, L1003. I need to identify which one corresponds to the phone number 555-123-2002.
+2. Check if the line has roaming enabled
+3. Run diagnostic checks on their device
+
+Let me get the details for each line to find which one has the phone number 555-123-2002. I'll call get_details_by_id for each line.<|end|><|start|>assistant to=functions.get_details_by_id<|channel|>commentary json<|message|>"{\"id\": \"L1001\"}"<|call|>

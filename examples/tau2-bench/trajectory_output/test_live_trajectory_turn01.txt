@@ -1,7 +1,15 @@
 # Turn: 1, Reward: 0.0, Terminated: False
 ============================================================
 
-<|im_start|>system
+<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.
+Knowledge cutoff: 2024-06
+Current date: 2025-12-07
+
+Reasoning: medium
+
+# Valid channels: analysis, commentary, final. Channel must be included for every message.
+Calls to these tools must go to the commentary channel: 'functions'.<|end|><|start|>developer<|message|># Instructions
+
 <main_policy>
 # Telecom Agent Policy
 
@@ -374,46 +382,151 @@ If `check_app_permissions(app_name="messaging")` shows "storage" and "sms" permi
 
 # Tools
 
-You may call one or more functions to assist with the user query.
+## functions
 
-You are provided with function signatures within <tools></tools> XML tags:
-<tools>
-{"type": "function", "function": {"name": "get_customer_by_phone", "description": "Finds a customer by their primary contact or line phone number.", "parameters": {"properties": {"phone_number": {"description": "The phone number to search for.", "title": "Phone Number", "type": "string"}}, "required": ["phone_number"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "get_customer_by_id", "description": "Retrieves a customer directly by their unique ID.", "parameters": {"properties": {"customer_id": {"description": "The unique identifier of the customer.", "title": "Customer Id", "type": "string"}}, "required": ["customer_id"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "get_customer_by_name", "description": "Searches for customers by name and DOB. May return multiple matches if names are similar,\n\nDOB helps disambiguate.", "parameters": {"properties": {"full_name": {"description": "The full name of the customer.", "title": "Full Name", "type": "string"}, "dob": {"description": "Date of birth for verification, in the format YYYY-MM-DD.", "title": "Dob", "type": "string"}}, "required": ["full_name", "dob"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "get_details_by_id", "description": "Retrieves the details for a given ID.\n\nThe ID must be a valid ID for a Customer, Line, Device, Bill, or Plan.", "parameters": {"properties": {"id": {"description": "The ID of the object to retrieve.", "title": "Id", "type": "string"}}, "required": ["id"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "suspend_line", "description": "Suspends a specific line (max 6 months).\n\nChecks: Line status must be Active.\nLogic: Sets line status to Suspended, records suspension_start_date.", "parameters": {"properties": {"customer_id": {"description": "ID of the customer who owns the line.", "title": "Customer Id", "type": "string"}, "line_id": {"description": "ID of the line to suspend.", "title": "Line Id", "type": "string"}, "reason": {"description": "Reason for suspension.", "title": "Reason", "type": "string"}}, "required": ["customer_id", "line_id", "reason"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "resume_line", "description": "Resumes a suspended line.\n\nChecks: Line status must be Suspended or Pending Activation.\nLogic: Sets line status to Active, clears suspension_start_date.", "parameters": {"properties": {"customer_id": {"description": "ID of the customer who owns the line.", "title": "Customer Id", "type": "string"}, "line_id": {"description": "ID of the line to resume.", "title": "Line Id", "type": "string"}}, "required": ["customer_id", "line_id"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "get_bills_for_customer", "description": "Retrieves a list of the customer's bills, most recent first.", "parameters": {"properties": {"customer_id": {"description": "ID of the customer.", "title": "Customer Id", "type": "string"}, "limit": {"default": 12, "description": "Maximum number of bills to return.", "title": "Limit", "type": "integer"}}, "required": ["customer_id"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "send_payment_request", "description": "Sends a payment request to the customer for a specific bill.\n\nChecks:\n    - Customer exists\n    - Bill exists and belongs to the customer\n    - No other bills are already awaiting payment for this customer\nLogic: Sets bill status to AWAITING_PAYMENT and notifies customer.\nWarning: This method does not check if the bill is already PAID.\nAlways check the bill status before calling this method.", "parameters": {"properties": {"customer_id": {"description": "ID of the customer who owns the bill.", "title": "Customer Id", "type": "string"}, "bill_id": {"description": "ID of the bill to send payment request for.", "title": "Bill Id", "type": "string"}}, "required": ["customer_id", "bill_id"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "get_data_usage", "description": "Retrieves current billing cycle data usage for a line, including data\n\nrefueling amount, data limit, and cycle end date.", "parameters": {"properties": {"customer_id": {"description": "ID of the customer who owns the line.", "title": "Customer Id", "type": "string"}, "line_id": {"description": "ID of the line to check usage for.", "title": "Line Id", "type": "string"}}, "required": ["customer_id", "line_id"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "enable_roaming", "description": "Enables international roaming on a line.", "parameters": {"properties": {"customer_id": {"description": "ID of the customer who owns the line.", "title": "Customer Id", "type": "string"}, "line_id": {"description": "ID of the line to enable roaming for.", "title": "Line Id", "type": "string"}}, "required": ["customer_id", "line_id"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "disable_roaming", "description": "Disables international roaming on a line.", "parameters": {"properties": {"customer_id": {"description": "ID of the customer who owns the line.", "title": "Customer Id", "type": "string"}, "line_id": {"description": "ID of the line to disable roaming for.", "title": "Line Id", "type": "string"}}, "required": ["customer_id", "line_id"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "transfer_to_human_agents", "description": "Transfer the user to a human agent, with a summary of the user's issue.\n\nOnly transfer if\n -  the user explicitly asks for a human agent\n -  given the policy and the available tools, you cannot solve the user's issue.", "parameters": {"properties": {"summary": {"description": "A summary of the user's issue.", "title": "Summary", "type": "string"}}, "required": ["summary"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "refuel_data", "description": "Refuels data for a specific line, adding to the customer's bill.\n\nChecks: Line status must be Active, Customer owns the line.\nLogic: Adds data to the line and charges customer based on the plan's refueling rate.", "parameters": {"properties": {"customer_id": {"description": "ID of the customer who owns the line.", "title": "Customer Id", "type": "string"}, "line_id": {"description": "ID of the line to refuel data for.", "title": "Line Id", "type": "string"}, "gb_amount": {"description": "Amount of data to add in gigabytes.", "title": "Gb Amount", "type": "number"}}, "required": ["customer_id", "line_id", "gb_amount"], "title": "parameters", "type": "object"}}}
-{"type": "function", "function": {"name": "done", "description": "Call this function when you have completed the task and the customer is satisfied.", "parameters": {"type": "object", "properties": {}}}}
-</tools>
+namespace functions {
 
-For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
-<tool_call>
-{"name": <function-name>, "arguments": <args-json-object>}
-</tool_call><|im_end|>
-<|im_start|>user
-Hi there! Thank you for reaching out. My name is John Smith, and my phone number is 555-123-2002.
+// Finds a customer by their primary contact or line phone number.
+type get_customer_by_phone = (_: {
+// The phone number to search for.
+phone_number: string,
+}) => any;
 
-I'm currently abroad in France, and I'm experiencing significant issues with my mobile data connection. The problem is that my data is either stopping working entirely or running extremely slowly. I absolutely need to get this fixed because I need excellent internet speed on my phone for my work. I don't have access to WiFi, so I'm completely dependent on my mobile data connection right now.
+// Retrieves a customer directly by their unique ID.
+type get_customer_by_id = (_: {
+// The unique identifier of the customer.
+customer_id: string,
+}) => any;
 
-Can you help me diagnose and resolve this issue?<|im_end|>
-<|im_start|>assistant
-<think>
-The user is John Smith with phone number 555-123-2002, and he's having mobile data issues while abroad in France. Let me identify the customer first using their phone number.
+// Searches for customers by name and DOB. May return multiple matches if names are similar,
 
-Let me call the get_customer_by_phone function to retrieve their customer information.
-</think>
+DOB helps disambiguate.
+type get_customer_by_name = (_: {
+// The full name of the customer.
+full_name: string,
+// Date of birth for verification, in the format YYYY-MM-DD.
+dob: string,
+}) => any;
 
-Hello John! Thank you for reaching out. I understand how critical this is for your work. I'll help you diagnose and resolve your mobile data issue right away.
+// Retrieves the details for a given ID.
 
-Let me first retrieve your account information.
-<tool_call>
-{"name": "get_customer_by_phone", "arguments": {"phone_number": "555-123-2002"}}
-</tool_call><|im_end|>
+The ID must be a valid ID for a Customer, Line, Device, Bill, or Plan.
+type get_details_by_id = (_: {
+// The ID of the object to retrieve.
+id: string,
+}) => any;
+
+// Suspends a specific line (max 6 months).
+
+Checks: Line status must be Active.
+Logic: Sets line status to Suspended, records suspension_start_date.
+type suspend_line = (_: {
+// ID of the customer who owns the line.
+customer_id: string,
+// ID of the line to suspend.
+line_id: string,
+// Reason for suspension.
+reason: string,
+}) => any;
+
+// Resumes a suspended line.
+
+Checks: Line status must be Suspended or Pending Activation.
+Logic: Sets line status to Active, clears suspension_start_date.
+type resume_line = (_: {
+// ID of the customer who owns the line.
+customer_id: string,
+// ID of the line to resume.
+line_id: string,
+}) => any;
+
+// Retrieves a list of the customer's bills, most recent first.
+type get_bills_for_customer = (_: {
+// ID of the customer.
+customer_id: string,
+// Maximum number of bills to return.
+limit?: number, // default: 12,
+}) => any;
+
+// Sends a payment request to the customer for a specific bill.
+
+Checks:
+    - Customer exists
+    - Bill exists and belongs to the customer
+    - No other bills are already awaiting payment for this customer
+Logic: Sets bill status to AWAITING_PAYMENT and notifies customer.
+Warning: This method does not check if the bill is already PAID.
+Always check the bill status before calling this method.
+type send_payment_request = (_: {
+// ID of the customer who owns the bill.
+customer_id: string,
+// ID of the bill to send payment request for.
+bill_id: string,
+}) => any;
+
+// Retrieves current billing cycle data usage for a line, including data
+
+refueling amount, data limit, and cycle end date.
+type get_data_usage = (_: {
+// ID of the customer who owns the line.
+customer_id: string,
+// ID of the line to check usage for.
+line_id: string,
+}) => any;
+
+// Enables international roaming on a line.
+type enable_roaming = (_: {
+// ID of the customer who owns the line.
+customer_id: string,
+// ID of the line to enable roaming for.
+line_id: string,
+}) => any;
+
+// Disables international roaming on a line.
+type disable_roaming = (_: {
+// ID of the customer who owns the line.
+customer_id: string,
+// ID of the line to disable roaming for.
+line_id: string,
+}) => any;
+
+// Transfer the user to a human agent, with a summary of the user's issue.
+
+Only transfer if
+ -  the user explicitly asks for a human agent
+ -  given the policy and the available tools, you cannot solve the user's issue.
+type transfer_to_human_agents = (_: {
+// A summary of the user's issue.
+summary: string,
+}) => any;
+
+// Refuels data for a specific line, adding to the customer's bill.
+
+Checks: Line status must be Active, Customer owns the line.
+Logic: Adds data to the line and charges customer based on the plan's refueling rate.
+type refuel_data = (_: {
+// ID of the customer who owns the line.
+customer_id: string,
+// ID of the line to refuel data for.
+line_id: string,
+// Amount of data to add in gigabytes.
+gb_amount: number,
+}) => any;
+
+// Call this function when you have completed the task and the customer is satisfied.
+type done = () => any;
+
+} // namespace functions<|end|><|start|>user<|message|>Hi there! Thanks for picking up. My name is John Smith, and I'm calling about my mobile data service. I'm currently abroad in France, and my mobile data has been really problematic lately. It either stops working entirely or it's incredibly slow, and it's making it very difficult to stay connected.
+
+I need to get this fixed because I absolutely need excellent internet speed on my phone. I don't have access to Wi-Fi, so my mobile data is critical. I'm not willing to accept anything less than excellent speed - if it's poor, fair, or just good, that won't work for me.
+
+Can you help me troubleshoot this? My phone number is 555-123-2002.<|end|><|start|>assistant<|channel|>analysis<|message|>Hi John! Thanks for contacting us. I'd be happy to help you troubleshoot your mobile data issues while you're traveling in France. Let me start by pulling up your account information.
+
+The user is calling about mobile data service issues while traveling abroad in France. They have a phone number (555-123-2002) and they're experiencing slow or non-working mobile data. They require excellent internet speed.
+
+Let me follow the policy:
+1. First, I need to identify the customer using the phone number provided
+2. Then I need to troubleshoot their mobile data issue
+3. Since they're abroad (roaming), I'll need to check if roaming is enabled
+
+Let me start by identifying the customer using their phone number.<|end|><|start|>assistant to=functions.get_customer_by_phone<|channel|>commentary json<|message|>"{\"phone_number\": \"555-123-2002\"}"<|call|>

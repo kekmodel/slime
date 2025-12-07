@@ -55,7 +55,7 @@ EVAL_DATA="${DATA_DIR}/${TAU2_DOMAIN}_dev_tasks.jsonl"
 if [ ! -f "${TRAIN_DATA}" ]; then
     echo "Preparing training data..."
     mkdir -p "${DATA_DIR}"
-    python -m tau2_bench.prepare_data \
+    python "${SCRIPT_DIR}/prepare_data.py" \
         --domain "${TAU2_DOMAIN}" \
         --task-split "${TAU2_TASK_SPLIT}" \
         --output-path "${TRAIN_DATA}"
@@ -63,7 +63,7 @@ fi
 
 if [ ! -f "${EVAL_DATA}" ]; then
     echo "Preparing evaluation data..."
-    python -m tau2_bench.prepare_data \
+    python "${SCRIPT_DIR}/prepare_data.py" \
         --domain "${TAU2_DOMAIN}" \
         --task-split "dev" \
         --output-path "${EVAL_DATA}" || true  # dev split may not exist

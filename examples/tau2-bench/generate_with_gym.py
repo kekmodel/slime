@@ -43,6 +43,23 @@ def _env_str(key: str, default: str) -> str:
     return os.environ.get(key, default)
 
 
+def _get_thinking_field(tokenizer_name: str) -> str:
+    """
+    Get the correct field name for reasoning/thinking based on tokenizer.
+
+    - Qwen: uses 'reasoning_content' → rendered as <think>...</think>
+    - gpt-oss: uses 'thinking' → rendered as <|channel|>analysis
+    """
+    name_lower = tokenizer_name.lower()
+    if "qwen" in name_lower:
+        return "reasoning_content"
+    elif "gpt-oss" in name_lower:
+        return "thinking"
+    else:
+        # Default to reasoning_content
+        return "reasoning_content"
+
+
 def _env_int(key: str, default: int) -> int:
     return int(os.environ.get(key, str(default)))
 
@@ -96,6 +113,13 @@ async def generate(args, sample: Sample, sampling_params: dict) -> Sample:
     # sglang 상태 및 URL 초기화
     state = GenerateState(args)
     url = f"http://{args.sglang_router_ip}:{args.sglang_router_port}/generate"
+
+    # Tokenizer에 따른 thinking field 결정
+    tokenizer_name = getattr(state.tokenizer, "name_or_path", "")
+    thinking_field = _get_thinking_field(tokenizer_name)
+    is_gpt_oss = "gpt-oss" in tokenizer_name.lower()
+
+    logger.debug(f"Tokenizer: {tokenizer_name}, thinking_field: {thinking_field}")
 
     # 샘플에서 task ID 추출
     task_id = sample.metadata.get("task_id") or sample.prompt
@@ -220,28 +244,45 @@ async def generate(args, sample: Sample, sampling_params: dict) -> Sample:
                 )
 
             # Context에 assistant 메시지 추가
-            # Extract thinking from response for Qwen chat template
+            # Extract thinking from response
             thinking_text, normal_text = extract_think_content(
                 parsed.normal_text or ""
             )
-            assistant_msg = {
-                "role": "assistant",
-                "content": normal_text,
-                "tool_calls": [
-                    {
-                        "id": a.id,
-                        "type": "function",
-                        "function": {
-                            "name": a.name,
-                            "arguments": json.dumps(a.arguments),
-                        },
-                    }
-                    for a in actions
-                ],
-            }
-            # Add reasoning_content for Qwen chat template
-            if thinking_text:
-                assistant_msg["reasoning_content"] = thinking_text
+
+            tool_calls_data = [
+                {
+                    "id": a.id,
+                    "type": "function",
+                    "function": {
+                        "name": a.name,
+                        "arguments": json.dumps(a.arguments),
+                    },
+                }
+                for a in actions
+            ]
+
+            # gpt-oss 제약: tool_calls + thinking 시 content는 빈 문자열이어야 함
+            if is_gpt_oss and thinking_text:
+                # thinking에 normal_text 포함 (있다면)
+                combined_thinking = thinking_text
+                if normal_text:
+                    combined_thinking = f"{normal_text}\n\n{thinking_text}"
+                assistant_msg = {
+                    "role": "assistant",
+                    "content": "",  # gpt-oss: must be empty with tool_calls + thinking
+                    "tool_calls": tool_calls_data,
+                    "thinking": combined_thinking,
+                }
+            else:
+                # Qwen 및 기타: reasoning_content 사용
+                assistant_msg = {
+                    "role": "assistant",
+                    "content": normal_text,
+                    "tool_calls": tool_calls_data,
+                }
+                if thinking_text:
+                    assistant_msg[thinking_field] = thinking_text
+
             context_messages.append(assistant_msg)
 
             # Assistant 토큰 계산 (loss_mask=1, 학습 대상)
@@ -273,7 +314,7 @@ async def generate(args, sample: Sample, sampling_params: dict) -> Sample:
 
             # Context에 assistant 메시지 추가
             if assistant_response:
-                # Extract thinking from response for Qwen chat template
+                # Extract thinking from response
                 thinking_text, normal_text = extract_think_content(
                     assistant_response
                 )
@@ -281,9 +322,9 @@ async def generate(args, sample: Sample, sampling_params: dict) -> Sample:
                     "role": "assistant",
                     "content": normal_text,
                 }
-                # Add reasoning_content for Qwen chat template
+                # Add thinking field (reasoning_content for Qwen, thinking for gpt-oss)
                 if thinking_text:
-                    assistant_msg["reasoning_content"] = thinking_text
+                    assistant_msg[thinking_field] = thinking_text
                 context_messages.append(assistant_msg)
 
                 # Assistant 토큰 계산 (loss_mask=1, 학습 대상)

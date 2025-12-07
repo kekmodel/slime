@@ -116,11 +116,27 @@ def convert_to_raw_text(content: str, tool_calls: list[dict[str, Any]]) -> str:
     return "".join(parts)
 
 
-TOKENIZER_NAME = "Qwen/Qwen3-0.6B"
+TOKENIZER_NAME = "openai/gpt-oss-20b"
 
 # Output directory
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "trajectory_output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+def get_thinking_field_name(tokenizer_name: str) -> str:
+    """
+    Get the correct field name for reasoning/thinking based on tokenizer.
+
+    - Qwen3: uses 'reasoning_content' → rendered as <think>...</think>
+    - gpt-oss: uses 'thinking' → rendered as separate <|channel|>analysis message
+    """
+    if "qwen" in tokenizer_name.lower():
+        return "reasoning_content"
+    elif "gpt-oss" in tokenizer_name.lower():
+        return "thinking"
+    else:
+        # Default to reasoning_content for unknown tokenizers
+        return "reasoning_content"
 
 
 @dataclass
@@ -143,6 +159,79 @@ class MockSample:
     metadata: dict = field(default_factory=dict)
 
 
+def _transform_messages_for_tokenizer(
+    messages: list[dict[str, Any]],
+    thinking_field: str,
+) -> list[dict[str, Any]]:
+    """
+    Transform messages for tokenizer rendering.
+
+    For gpt-oss: Split assistant messages with thinking + tool_calls into separate messages.
+    For Qwen: Convert thinking_blocks to reasoning_content field.
+    """
+    if thinking_field != "thinking":
+        # Qwen and others: just convert thinking_blocks to reasoning_content
+        result = []
+        for msg in messages:
+            new_msg = dict(msg)
+            if msg.get("role") == "assistant" and msg.get("thinking_blocks"):
+                thinking_text = _extract_thinking_text(msg["thinking_blocks"])
+                if thinking_text:
+                    new_msg["reasoning_content"] = thinking_text
+                # Remove thinking_blocks (not needed for Qwen template)
+                new_msg.pop("thinking_blocks", None)
+            result.append(new_msg)
+        return result
+
+    # gpt-oss: For tool_calls messages, use thinking field (not content) for analysis
+    # Template logic: if tool_calls present, renders thinking OR content as analysis channel
+    # Cannot have BOTH content and thinking with tool_calls
+    result = []
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            result.append(msg)
+            continue
+
+        thinking_blocks = msg.get("thinking_blocks")
+        tool_calls = msg.get("tool_calls")
+        content = msg.get("content", "")
+
+        if thinking_blocks and tool_calls:
+            # gpt-oss: Put thinking in 'thinking' field, content must be empty
+            # Template will render thinking as analysis channel, then tool call
+            # If there's content, prepend it to thinking (since we can only use one)
+            thinking_text = _extract_thinking_text(thinking_blocks)
+            if content and thinking_text:
+                # Combine: content first, then thinking
+                thinking_text = f"{content}\n\n{thinking_text}"
+            elif content:
+                thinking_text = content
+
+            new_msg = {
+                "role": "assistant",
+                "content": "",  # Must be empty when using thinking with tool_calls
+                "tool_calls": tool_calls,
+            }
+            if thinking_text:
+                new_msg["thinking"] = thinking_text
+            result.append(new_msg)
+        elif thinking_blocks:
+            # Only thinking, no tool calls
+            thinking_text = _extract_thinking_text(thinking_blocks)
+            new_msg = {
+                "role": "assistant",
+                "content": content,
+            }
+            if thinking_text:
+                new_msg["thinking"] = thinking_text
+            result.append(new_msg)
+        else:
+            # No thinking blocks, keep as is
+            result.append(msg)
+
+    return result
+
+
 def save_trajectory(
     tokenizer: AutoTokenizer,
     context_messages: list[dict[str, Any]],
@@ -150,6 +239,7 @@ def save_trajectory(
     turn_count: int,
     reward: float,
     terminated: bool,
+    thinking_field: str = "reasoning_content",
 ):
     """
     Save decoded trajectory and context messages to files.
@@ -165,9 +255,14 @@ def save_trajectory(
         OUTPUT_DIR, f"test_live_context_turn{turn_count:02d}.json"
     )
 
+    # Transform messages for tokenizer (gpt-oss needs special handling)
+    transformed_messages = _transform_messages_for_tokenizer(
+        context_messages, thinking_field
+    )
+
     # Use apply_chat_template to test actual template behavior
     full_text = tokenizer.apply_chat_template(
-        context_messages,
+        transformed_messages,
         tokenize=False,
         add_generation_prompt=False,
         tools=tool_specs,
@@ -315,6 +410,7 @@ def run_episode(
     task_id: str,
     settings: dict,
     tokenizer: AutoTokenizer,
+    tokenizer_name: str,
     max_steps: int = 100,
 ) -> MockSample:
     """
@@ -366,6 +462,10 @@ def run_episode(
 
     # Create tool adapter for parsing test
     tool_adapter = create_tool_adapter(tool_specs, settings["tool_parser"])
+
+    # Get thinking field name based on tokenizer
+    thinking_field = get_thinking_field_name(tokenizer_name)
+    logger.info(f"Using thinking field: {thinking_field} (tokenizer: {tokenizer_name})")
 
     # Tracking
     response_token_ids: list[int] = []
@@ -436,6 +536,8 @@ def run_episode(
                     )
 
                 # Add assistant message with tool calls to context
+                # Keep original structure with thinking_blocks for Claude API
+                # Transformation for tokenizer happens in save_trajectory
                 assistant_msg = {
                     "role": "assistant",
                     "content": agent_response.content or "",
@@ -453,18 +555,9 @@ def run_episode(
                 }
                 # Preserve thinking_blocks for Claude extended thinking
                 if agent_response.thinking_blocks:
-                    assistant_msg["thinking_blocks"] = (
-                        agent_response.thinking_blocks
-                    )
-                    # Extract text for Qwen3 chat template (reasoning_content)
-                    thinking_text = _extract_thinking_text(
-                        agent_response.thinking_blocks
-                    )
-                    if thinking_text:
-                        assistant_msg["reasoning_content"] = thinking_text
-                        logger.info(f"  Added reasoning_content: {len(thinking_text)} chars")
-                    else:
-                        logger.warning("  _extract_thinking_text returned empty!")
+                    assistant_msg["thinking_blocks"] = agent_response.thinking_blocks
+                    logger.info(f"  Added thinking_blocks: {len(agent_response.thinking_blocks)} blocks")
+
                 context_messages.append(assistant_msg)
                 logger.debug(f"  assistant_msg keys: {list(assistant_msg.keys())}")
 
@@ -477,6 +570,7 @@ def run_episode(
                     turn_count=turn_count,
                     reward=0.0,  # reward not yet known
                     terminated=False,
+                    thinking_field=thinking_field,
                 )
 
                 # Execute tool calls
@@ -511,18 +605,8 @@ def run_episode(
                     }
                     # Preserve thinking_blocks for Claude extended thinking
                     if agent_response.thinking_blocks:
-                        assistant_msg["thinking_blocks"] = (
-                            agent_response.thinking_blocks
-                        )
-                        # Extract text for Qwen3 chat template (reasoning_content)
-                        thinking_text = _extract_thinking_text(
-                            agent_response.thinking_blocks
-                        )
-                        if thinking_text:
-                            assistant_msg["reasoning_content"] = thinking_text
-                            logger.info(f"  Added reasoning_content: {len(thinking_text)} chars")
-                        else:
-                            logger.warning("  _extract_thinking_text returned empty!")
+                        assistant_msg["thinking_blocks"] = agent_response.thinking_blocks
+                        logger.info(f"  Added thinking_blocks: {len(agent_response.thinking_blocks)} blocks")
                     context_messages.append(assistant_msg)
                     logger.debug(f"  assistant_msg keys: {list(assistant_msg.keys())}")
 
@@ -534,6 +618,7 @@ def run_episode(
                         turn_count=turn_count,
                         reward=0.0,
                         terminated=False,
+                        thinking_field=thinking_field,
                     )
 
                 # Execute
@@ -581,6 +666,7 @@ def run_episode(
             turn_count=turn_count,
             reward=sample.reward,
             terminated=False,
+            thinking_field=thinking_field,
         )
 
     # Build response from assistant messages
@@ -757,6 +843,7 @@ def main():
         task_id=task.id,
         settings=settings,
         tokenizer=tokenizer,
+        tokenizer_name=TOKENIZER_NAME,
         max_steps=settings["max_steps"],
     )
 

@@ -5,11 +5,11 @@
   },
   {
     "role": "user",
-    "content": "Hi there! Thank you for reaching out. My name is John Smith, and my phone number is 555-123-2002.\n\nI'm currently abroad in France, and I'm experiencing significant issues with my mobile data connection. The problem is that my data is either stopping working entirely or running extremely slowly. I absolutely need to get this fixed because I need excellent internet speed on my phone for my work. I don't have access to WiFi, so I'm completely dependent on my mobile data connection right now.\n\nCan you help me diagnose and resolve this issue?"
+    "content": "Hi there! Thanks for picking up. My name is John Smith, and I'm calling about my mobile data service. I'm currently abroad in France, and my mobile data has been really problematic lately. It either stops working entirely or it's incredibly slow, and it's making it very difficult to stay connected.\n\nI need to get this fixed because I absolutely need excellent internet speed on my phone. I don't have access to Wi-Fi, so my mobile data is critical. I'm not willing to accept anything less than excellent speed - if it's poor, fair, or just good, that won't work for me.\n\nCan you help me troubleshoot this? My phone number is 555-123-2002."
   },
   {
     "role": "assistant",
-    "content": "Hello John! Thank you for reaching out. I understand how critical this is for your work. I'll help you diagnose and resolve your mobile data issue right away.\n\nLet me first retrieve your account information.",
+    "content": "Hi John! Thanks for contacting us. I'd be happy to help you troubleshoot your mobile data issues while you're traveling in France. Let me start by pulling up your account information.",
     "tool_calls": [
       {
         "id": "call_0",
@@ -23,10 +23,9 @@
     "thinking_blocks": [
       {
         "type": "thinking",
-        "thinking": "The user is John Smith with phone number 555-123-2002, and he's having mobile data issues while abroad in France. Let me identify the customer first using their phone number.\n\nLet me call the get_customer_by_phone function to retrieve their customer information.",
-        "signature": "Eq8DCkYIChgCKkAv6Os9juoXrHSxPRXubZcV/SaOUJCPgEwUHKnvnwcMP91HfDd9R4mVi6QRkQhEE8+fEPpiPy/25roqKHKy0NXUEgwBdhocUAt1H7f6d1IaDPFbYG4LqPKDfb90ASIwX7GZ0MhBHBiPnSuAY+vAIvXTmv3CLNfjLpXxQzwdQVMlZnwzb3y5irpdmoPBb+pgKpYC6AQeaQ3pgDrvCcKxPeLcKyjT/XKGKTDduUZr3fdhm8ONvzbcrEeY+laPFIKIo5gnYUlWZ0oSHZi8OY8J5AetchmcyNjCJK5HMHdphyXgVTuQF2yqZeliGEgptBx84FJpJO0atAe/6CRra8bQTNkHjZFCLVHUh96icny54OUWPM2q8EfszH8geXdBdf/gCJKkMb1RLwkdIXbxYgVKM3iliSMDLCMbRsD5k3qukud6SZIfaa6Lj+cmpAWFiwW9piARxOoF3rmMIDksGlm58ZVeOkpS4eNdcG4GpPp9l68gCzR3nMU+HZQR7rZehHVEG37S9BXE1vtC86SOyr5E+Nbplfii+h9qpnrwH6+/qYE/U4JAVq95e1MYAQ=="
+        "thinking": "The user is calling about mobile data service issues while traveling abroad in France. They have a phone number (555-123-2002) and they're experiencing slow or non-working mobile data. They require excellent internet speed.\n\nLet me follow the policy:\n1. First, I need to identify the customer using the phone number provided\n2. Then I need to troubleshoot their mobile data issue\n3. Since they're abroad (roaming), I'll need to check if roaming is enabled\n\nLet me start by identifying the customer using their phone number.",
+        "signature": "ErQFCkYIChgCKkDjc6WtTSflQ2YHoaB1dNWUJUhZP+gqqkkbd0RgRHEEIz96ooUysTChHATdiPauo8zLac39IrCeH7SK8C1L2uhLEgyEKYPHUVnXSb+ck9saDEVf8BRasVKlQ01KkyIw3NRw9PF/3TxifgJ9soxHUo5LIfgPdT12vwFxkNs6CSZ165llNIXfXjVMXtNWnbpyKpsEekjB+Qwi4P+eC6mwudxBhqUz7bjVDWng3RXv6vCArnJ+H+/sg8xAqDhQFs1LZ02oZILgtkZCkkdIrpYC530qc49UAsLRnL4qY5NRM9RmlhlNM4+0pM0rRtxKZoQ67nr2+QQa/Az80XxPgi3ZbhZYqdeNSo4zgciGhjZlqKo1w8Utm/FiBPbhPRrw+Nab9dwE3BSbjgDEqW558j3uOh3KvUMfjgwx+78lTP0diRoIQg+ch88Tk5pNY+zlZS0aFN7/nYU0dn41I2QroHhw2pE5bpmZ/apoYZ4N0XOYe5XWeG7pbOFclKtibhEOu/VO1WWpI7ow9UOSZNOjhE4Xe8L6Nwv7+aE6gjAALtcZM6rJ3ix88XNDx2tEUUEA43eNS/JVvKEBsc47A6HhegEZfsaoUh9gbCMGuEesMrWqOfc+Q7eh8/7NAe1MlW/0U76AimYIXbpATmVThxTmXgKoiRVb/ncd4ZweQhgntVfwEjoByHfrPYNPs+kkF91xPEbbHuPhdo9RN6FzJjE9iHxHJWV8oVcKLRGQLAT2ywSW4V5+9ViGucejrTDEdCq/9y3r0ouhIKMyL4G/INgCdSwAwvAGRAxU5E0tn0XUraZM5WUzBbIet1ns7dAXimUVCm4sPFcvOyAU4Ewaq0rhZqP6BRkEzkPon76Sno8+H9eIIcrarJdpj7rcdesQnooU2FXLeuFUNoFkdxcfqSpiZv0YAQ=="
       }
-    ],
-    "reasoning_content": "The user is John Smith with phone number 555-123-2002, and he's having mobile data issues while abroad in France. Let me identify the customer first using their phone number.\n\nLet me call the get_customer_by_phone function to retrieve their customer information."
+    ]
   }
 ]

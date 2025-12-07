@@ -202,6 +202,49 @@ Episode ends when:
 2. Max turns reached
 3. Max steps reached
 
+## Tokenizer-Based Thinking Field
+
+Different tokenizers use different fields for reasoning/thinking content:
+
+| Tokenizer | Field | Rendered Format |
+|-----------|-------|-----------------|
+| Qwen3 | `reasoning_content` | `<think>...</think>` |
+| gpt-oss | `thinking` | `<\|channel\|>analysis...` |
+
+### Automatic Detection
+
+`generate_with_gym.py` automatically detects the tokenizer and uses the correct field:
+
+```python
+# Auto-detection from tokenizer name
+tokenizer_name = getattr(state.tokenizer, "name_or_path", "")
+thinking_field = _get_thinking_field(tokenizer_name)  # "reasoning_content" or "thinking"
+```
+
+### gpt-oss Constraint
+
+When using gpt-oss tokenizer with tool_calls + thinking:
+- `content` must be empty string
+- All text goes into `thinking` field
+
+```python
+# gpt-oss with tool_calls + thinking
+{
+    "role": "assistant",
+    "content": "",  # Must be empty!
+    "tool_calls": [...],
+    "thinking": "Analysis content here..."
+}
+
+# Qwen3 with tool_calls + thinking
+{
+    "role": "assistant",
+    "content": "Normal response text",
+    "tool_calls": [...],
+    "reasoning_content": "Analysis content here..."
+}
+```
+
 ## Extended Thinking (Claude)
 
 When `TAU2_ALLOW_THINKING=true`:
@@ -213,19 +256,18 @@ When `TAU2_ALLOW_THINKING=true`:
 ### Thinking in Messages
 
 ```python
-# Assistant message with thinking
+# Claude API returns thinking_blocks
 {
     "role": "assistant",
     "content": "Let me check your account...",
     "tool_calls": [...],
     "thinking_blocks": [
         {"type": "thinking", "thinking": "The customer needs..."}
-    ],
-    "reasoning_content": "The customer needs..."
+    ]
 }
 ```
 
-For Qwen3 models, use `reasoning_content` field which gets wrapped in `<think>...</think>` tags by the chat template.
+For training, `thinking_blocks` are converted to the appropriate tokenizer field (`reasoning_content` for Qwen3, `thinking` for gpt-oss).
 
 ## Troubleshooting
 
