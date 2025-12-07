@@ -4,7 +4,9 @@ from sglang.srt.function_call.function_call_parser import FunctionCallParser
 from sglang.srt.managers.io_struct import Function, Tool
 
 
-def parse_tools(response: str, tools: list[dict[str, Any]], parser: str = "qwen25"):
+def parse_tools(
+    response: str, tools: list[dict[str, Any]], parser_type: str = "qwen25"
+):
     """
     This function mimics the function call parser API from
     https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/entrypoints/http_server.py#L952
@@ -21,11 +23,13 @@ def parse_tools(response: str, tools: list[dict[str, Any]], parser: str = "qwen2
         )
         for tool in tools
     ]
-    parser = FunctionCallParser(tools=tools_list, tool_call_parser=parser)
+    parser = FunctionCallParser(tools=tools_list, tool_call_parser=parser_type)
 
     normal_text, calls = parser.parse_non_stream(response)
 
     return {
         "normal_text": normal_text,
-        "calls": [call.model_dump() for call in calls],  # Convert pydantic objects to dictionaries
+        "calls": [
+            call.model_dump() for call in calls
+        ],  # Convert pydantic objects to dictionaries
     }

@@ -30,9 +30,10 @@ TAU_CONFIGS = {
     "model": "qwen3-4b",  # Unused, required
     "user_model_provider": "gemini",
 }
-# Replace with your actual API key for user sim
-GEMINI_API_KEY = "NONE"
-os.environ["GEMINI_API_KEY"] = GEMINI_API_KEY
+# Get API key from environment variable (set GEMINI_API_KEY before running)
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+if not GEMINI_API_KEY:
+    logger.warning("GEMINI_API_KEY environment variable not set")
 tau_config = RunConfig(**TAU_CONFIGS)
 
 
@@ -92,12 +93,16 @@ def res_to_sample(res: InteractionResult, task_index: int) -> Sample:
             sample.response_length = len(res.tokens)
         else:
             sample.response_length = 0
-            logger.debug(f"res_to_sample: Set response_length={sample.response_length}")
+            logger.debug(
+                f"res_to_sample: Set response_length={sample.response_length}"
+            )
 
     return sample
 
 
-async def generate(args: dict[str, Any], sample: Sample, sampling_params: dict) -> Sample:
+async def generate(
+    args: dict[str, Any], sample: Sample, sampling_params: dict
+) -> Sample:
     """
     Generate a complete agent-environment interaction trajectory for tau-bench.
 
@@ -117,7 +122,9 @@ async def generate(args: dict[str, Any], sample: Sample, sampling_params: dict) 
         AssertionError: If partial rollout is requested (not supported)
     """
     # Validate arguments
-    assert not args.partial_rollout, "Partial rollout is not supported for tau-bench interactions."
+    assert (
+        not args.partial_rollout
+    ), "Partial rollout is not supported for tau-bench interactions."
 
     # Extract task index from sample prompt
     task_index = int(sample.prompt)
@@ -144,7 +151,9 @@ async def generate(args: dict[str, Any], sample: Sample, sampling_params: dict) 
 
     # Execute agent-environment interaction
     # Note: The sample.prompt field contains the task index for repeatability
-    interaction_result = await agent.asolve(env, agent.rollout_args, agent.sampling_params, task_index)
+    interaction_result = await agent.asolve(
+        env, agent.rollout_args, agent.sampling_params, task_index
+    )
 
     # Convert to slime Sample format
     result_sample = res_to_sample(interaction_result, task_index)

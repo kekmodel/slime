@@ -34,7 +34,7 @@ class InteractionResult:
     info: dict[str, Any]
     response: str = ""
     loss_mask: list[int] | None = None
-    tokens: int | None = None
+    tokens: list[int] | None = None
     status: Status = Status.COMPLETED
 
 
@@ -96,9 +96,8 @@ class TrainableAgentMixin:
         )
 
     async def _call_llm(
-        self, url: str, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
-    async def _call_llm(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self, url: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Make an LLM call tracking.
 
@@ -136,7 +135,9 @@ class TrainableAgentMixin:
         """
         return env.step(action)
 
-    def _initialize_environment(self, env, task_index: Optional[int]) -> Tuple[str, Dict[str, Any]]:
+    def _initialize_environment(
+        self, env, task_index: int | None
+    ) -> tuple[str, dict[str, Any]]:
         """
         Initialize the environment and get initial observation.
 
@@ -168,7 +169,9 @@ class TrainableAgentMixin:
             {"role": "user", "content": obs},
         ]
 
-    def _prepare_prompt_tokens(self, state: GenerateState, messages: List[Dict[str, Any]]) -> Tuple[str, List[int]]:
+    def _prepare_prompt_tokens(
+        self, state: GenerateState, messages: list[dict[str, Any]]
+    ) -> tuple[str, list[int]]:
         """
         Prepare prompt text and tokenize it.
 
@@ -416,7 +419,9 @@ class TrainableAgentMixin:
             response_token_ids,
         )
 
-    def _get_token_delta(self, tokenizer: AutoTokenizer, messages: List[Dict]) -> Tuple[List[int], List[int]]:
+    def _get_token_delta(
+        self, tokenizer: AutoTokenizer, messages: list[dict]
+    ) -> tuple[list[int], list[int]]:
         """
         Calculate token delta for multi-turn conversations.
 

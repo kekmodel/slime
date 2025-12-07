@@ -24,7 +24,7 @@ from slime.rollout.sglang_rollout import GenerateState
 from slime.utils.http_utils import post
 from slime.utils.types import Sample
 
-from .message_utils import get_token_delta
+from .message_utils import get_token_delta, extract_think_content
 from .slime_env import SlimeGymEnv, ToolCallAction, TextAction
 from .tool_parser import create_tool_adapter
 
@@ -220,9 +220,13 @@ async def generate(args, sample: Sample, sampling_params: dict) -> Sample:
                 )
 
             # Context에 assistant 메시지 추가
+            # Extract thinking from response for Qwen chat template
+            thinking_text, normal_text = extract_think_content(
+                parsed.normal_text or ""
+            )
             assistant_msg = {
                 "role": "assistant",
-                "content": parsed.normal_text or "",
+                "content": normal_text,
                 "tool_calls": [
                     {
                         "id": a.id,
@@ -235,6 +239,9 @@ async def generate(args, sample: Sample, sampling_params: dict) -> Sample:
                     for a in actions
                 ],
             }
+            # Add reasoning_content for Qwen chat template
+            if thinking_text:
+                assistant_msg["reasoning_content"] = thinking_text
             context_messages.append(assistant_msg)
 
             # Assistant 토큰 계산 (loss_mask=1, 학습 대상)
@@ -266,10 +273,18 @@ async def generate(args, sample: Sample, sampling_params: dict) -> Sample:
 
             # Context에 assistant 메시지 추가
             if assistant_response:
-                context_messages.append({
+                # Extract thinking from response for Qwen chat template
+                thinking_text, normal_text = extract_think_content(
+                    assistant_response
+                )
+                assistant_msg = {
                     "role": "assistant",
-                    "content": assistant_response,
-                })
+                    "content": normal_text,
+                }
+                # Add reasoning_content for Qwen chat template
+                if thinking_text:
+                    assistant_msg["reasoning_content"] = thinking_text
+                context_messages.append(assistant_msg)
 
                 # Assistant 토큰 계산 (loss_mask=1, 학습 대상)
                 token_ids, mask = get_token_delta(
