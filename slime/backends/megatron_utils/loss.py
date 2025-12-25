@@ -505,7 +505,7 @@ def policy_loss_function(
         log_probs = torch.cat(log_probs, dim=0)
         ppo_kl = old_log_probs - log_probs
 
-    # Compute policy loss: CISPO uses clipping with stop-gradient
+    # Compute policy loss based on advantage estimator
     if args.advantage_estimator == "kimi":
         # K2/Kimi loss: (A - τ * log(π_θ/π_old))² = (A + τ * ppo_kl)²
         # ppo_kl = log(π_old) - log(π_θ)
