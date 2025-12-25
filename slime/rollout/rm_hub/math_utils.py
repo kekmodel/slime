@@ -220,7 +220,7 @@ def _str_is_int(x: str) -> bool:
         return False
 
 
-def _str_to_int(x: str) -> bool:
+def _str_to_int(x: str) -> int:
     x = x.replace(",", "")
     x = float(x)
     return int(x)
@@ -478,7 +478,8 @@ def extract_answer(passage: str) -> str:
 
     # Try GSM8K format (#### answer)
     import re
-    match = re.search(r'####\s*(\S+)', passage)
+
+    match = re.search(r"####\s*(\S+)", passage)
     if match:
         return match.group(1)
 

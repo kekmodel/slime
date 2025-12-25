@@ -7,6 +7,7 @@
         {'test_file': 'test_qwen3_4B_ppo.py', 'num_gpus': 8},
         {'test_file': 'test_moonlight_16B_A3B.py', 'num_gpus': 8},
         {'test_file': 'test_qwen3_4B_fsdp_true_on_policy.py', 'num_gpus': 2},
+        {'test_file': 'test_mimo_7B_mtp_only_grad.py', 'num_gpus': 8},
       ],
     },
     'e2e-test-long': {
@@ -22,6 +23,13 @@
       'label': 'run-ci-precision',
       'tests': [
         {'test_file': 'test_qwen3_0.6B_parallel_check.py', 'num_gpus': 8},
+      ],
+    },
+    'e2e-test-ckpt': {
+      'label': 'run-ci-ckpt',
+      'tests': [
+        {'test_file': 'test_qwen3_4B_ckpt.py', 'num_gpus': 8},
+        {'test_file': 'test_qwen3_4B_ckpt.py --async-save', 'num_gpus': 8},
       ],
     },
 } %>
@@ -86,7 +94,7 @@ jobs:
 
       - name: Install
         shell: bash
-        run: cd $GITHUB_WORKSPACE && pip install -e .
+        run: cd $GITHUB_WORKSPACE && pip install -e . --break-system-packages
 
       - name: Execute
         shell: bash
