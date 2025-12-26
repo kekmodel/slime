@@ -1,36 +1,25 @@
 """
-Dynamic Environment - Example of environment with runtime tool loading.
+Dynamic Environment - Environment with runtime tool loading.
 
-Demonstrates how to:
-1. Load tool implementations from metadata
-2. Mix static and dynamic tools
-3. Use tool providers for modular tool organization
-
-Example metadata:
-    {
-        "env_name": "dynamic_service",
-        "tool_implementations": {
-            "search": "search_advanced",
-            "calculate": "calculate_safe"
-        },
-        "tool_providers": ["payment_tools"],
-        "expected_actions": ["search", "calculate"]
-    }
+Demonstrates:
+1. Loading tool implementations from metadata
+2. Mixing static and dynamic tools
+3. Using tool providers for modular organization
 """
 
 from dataclasses import dataclass, field
 
-from slime.utils.types import Sample
-
 from .base import BaseEnvironment, tool
-from .gym_types import ToolResult
-from .tool_registry import DynamicToolMixin, ToolDefinition, get_registry
+from .env_registry import EnvironmentRegistry
+from .tool_registry import DynamicToolMixin, ToolDefinition, ToolRegistry, get_registry
+from .types import ExecutionState, ToolResult
 
-# ==================== Custom Tool Providers ====================
+
+# ==================== Tool Providers ====================
 
 
 class PaymentToolProvider:
-    """Example tool provider for payment-related tools."""
+    """Tool provider for payment-related tools."""
 
     @staticmethod
     def get_tools() -> list[ToolDefinition]:
@@ -41,14 +30,8 @@ class PaymentToolProvider:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "amount": {
-                            "type": "number",
-                            "description": "Payment amount",
-                        },
-                        "method": {
-                            "type": "string",
-                            "description": "Payment method",
-                        },
+                        "amount": {"type": "number", "description": "Payment amount"},
+                        "method": {"type": "string", "description": "Payment method"},
                     },
                     "required": ["amount", "method"],
                 },
@@ -61,14 +44,8 @@ class PaymentToolProvider:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "transaction_id": {
-                            "type": "string",
-                            "description": "Original transaction ID",
-                        },
-                        "amount": {
-                            "type": "number",
-                            "description": "Refund amount",
-                        },
+                        "transaction_id": {"type": "string", "description": "Transaction ID"},
+                        "amount": {"type": "number", "description": "Refund amount"},
                     },
                     "required": ["transaction_id"],
                 },
@@ -79,7 +56,7 @@ class PaymentToolProvider:
 
     @staticmethod
     async def _process_payment(amount: float, method: str) -> str:
-        return f"Payment of ${amount:.2f} via {method} processed successfully. Transaction ID: TXN-12345"
+        return f"Payment of ${amount:.2f} via {method} processed. Transaction ID: TXN-12345"
 
     @staticmethod
     async def _refund_payment(transaction_id: str, amount: float | None = None) -> str:
@@ -88,7 +65,7 @@ class PaymentToolProvider:
 
 
 class AnalyticsToolProvider:
-    """Example tool provider for analytics tools."""
+    """Tool provider for analytics tools."""
 
     @staticmethod
     def get_tools() -> list[ToolDefinition]:
@@ -99,14 +76,8 @@ class AnalyticsToolProvider:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "metric_name": {
-                            "type": "string",
-                            "description": "Name of the metric",
-                        },
-                        "time_range": {
-                            "type": "string",
-                            "description": "Time range (e.g., '7d', '30d')",
-                        },
+                        "metric_name": {"type": "string", "description": "Metric name"},
+                        "time_range": {"type": "string", "description": "Time range"},
                     },
                     "required": ["metric_name"],
                 },
@@ -120,8 +91,8 @@ class AnalyticsToolProvider:
         return f"Metrics for {metric_name} over {time_range}: value=42, trend=+5%"
 
 
-# Register providers in global registry
-def _register_providers():
+def _register_providers() -> None:
+    """Register providers in global registry."""
     registry = get_registry()
     registry.register_provider("payment_tools", PaymentToolProvider)
     registry.register_provider("analytics_tools", AnalyticsToolProvider)
@@ -130,30 +101,21 @@ def _register_providers():
 _register_providers()
 
 
-# ==================== Dynamic Environment State ====================
-
-
-@dataclass
-class DynamicState:
-    """State for dynamic environment."""
-
-    context: dict = field(default_factory=dict)
-    tool_calls_made: list[str] = field(default_factory=list)
-    task_completed: bool = False
-
-
 # ==================== Dynamic Environment ====================
 
 
+@dataclass
+class DynamicState(ExecutionState):
+    """State with context storage."""
+
+    context: dict = field(default_factory=dict)
+    task_completed: bool = False
+
+
+@EnvironmentRegistry.register("dynamic_service")
 class DynamicServiceEnvironment(DynamicToolMixin, BaseEnvironment):
     """
     Environment with dynamic tool loading from metadata.
-
-    Supports:
-    - Static tools defined with @tool decorator
-    - Dynamic tools loaded from registry via tool_implementations
-    - Tool providers for modular tool organization
-    - Per-sample tool filtering
 
     Example metadata:
         {
@@ -164,67 +126,57 @@ class DynamicServiceEnvironment(DynamicToolMixin, BaseEnvironment):
         }
     """
 
-    def __init__(self):
-        super().__init__()
-        self.state: DynamicState | None = None
-        self.expected_actions: set[str] = set()
+    state: DynamicState
 
-    def seed(self, metadata: dict) -> None:
-        """
-        Initialize environment with static filtering and dynamic tool loading.
-        """
-        # 1. Call BaseEnvironment.seed() for enabled_tools filtering
-        super().seed(metadata)
+    def __init__(self, registry: ToolRegistry | None = None):
+        super().__init__(registry=registry)
+        self.state = DynamicState()
 
-        # 2. Load dynamic tools from metadata
-        self.load_dynamic_tools(metadata)
-
-        # 3. Initialize state
-        self.state = DynamicState(
-            context=metadata.get("context", {}),
-        )
+    def setup(self, metadata: dict) -> None:
+        """Initialize with static filtering and dynamic tool loading."""
+        # Reset state
+        self.state = DynamicState(context=metadata.get("context", {}))
+        self._enabled_tools = None
         self.expected_actions = set(metadata.get("expected_actions", []))
+
+        # Handle enabled_tools from metadata
+        if "enabled_tools" in metadata:
+            requested = set(metadata["enabled_tools"])
+            available = set(self._tools.keys())
+            self._enabled_tools = requested & available
+
+        # Load dynamic tools
+        self.load_dynamic_tools(metadata)
 
     def reset(self) -> None:
         super().reset()
-        self.state = None
-        self.expected_actions = set()
+        self.state = DynamicState()
         self._dynamic_tools.clear()
         self._dynamic_tool_schemas.clear()
 
-    # ==================== Tool Execution ====================
-
     async def execute_tool(self, name: str, arguments: dict) -> ToolResult:
-        """Execute tool and track in state."""
+        """Execute tool with state tracking."""
         result = await super().execute_tool(name, arguments)
-        # Track successful tool calls in state
-        if result.success and self.state:
-            self.state.tool_calls_made.append(name)
+        # State tracking is handled in parent classes
         return result
 
     # ==================== Static Tools ====================
 
     @tool(
-        description="Get information about the current context",
+        description="Get context information",
         parameters={
             "type": "object",
-            "properties": {
-                "key": {
-                    "type": "string",
-                    "description": "Context key to retrieve",
-                }
-            },
+            "properties": {"key": {"type": "string", "description": "Context key"}},
             "required": ["key"],
         },
     )
     async def get_context(self, key: str) -> str:
-        """Static tool: Get context information."""
-        if self.state and key in self.state.context:
+        if key in self.state.context:
             return f"{key}: {self.state.context[key]}"
         return f"No context found for key: {key}"
 
     @tool(
-        description="Update the context with new information",
+        description="Set context information",
         parameters={
             "type": "object",
             "properties": {
@@ -235,100 +187,27 @@ class DynamicServiceEnvironment(DynamicToolMixin, BaseEnvironment):
         },
     )
     async def set_context(self, key: str, value: str) -> str:
-        """Static tool: Set context information."""
-        if self.state:
-            self.state.context[key] = value
-            return f"Set {key} = {value}"
-        return "Error: State not initialized"
+        self.state.context[key] = value
+        return f"Set {key} = {value}"
 
     @tool(
-        description="Mark the current task as completed",
+        description="Mark task as completed",
         parameters={
             "type": "object",
-            "properties": {
-                "summary": {
-                    "type": "string",
-                    "description": "Task completion summary",
-                }
-            },
+            "properties": {"summary": {"type": "string", "description": "Completion summary"}},
             "required": ["summary"],
         },
     )
     async def complete_task(self, summary: str) -> str:
-        """Static tool: Mark task as complete."""
-        if self.state:
-            self.state.task_completed = True
-            return f"Task completed: {summary}"
-        return "Error: State not initialized"
+        self.state.task_completed = True
+        return f"Task completed: {summary}"
 
     # ==================== Verification ====================
 
-    async def verify(self, sample: Sample) -> float:
-        """
-        State-based verification.
-
-        Checks:
-        1. All expected_actions were executed (tracked in state.tool_calls_made)
-        2. Task was marked as completed (if required)
-
-        Note: Called from generate() while env.state is still valid.
-        """
-        if not self.state:
+    def verify(self) -> float:
+        """1.0 if all expected_actions executed and task completed, 0.0 otherwise."""
+        if not self.state.has_executed_all(self.expected_actions):
             return 0.0
-
-        # Check all expected actions were executed
-        executed = set(self.state.tool_calls_made)
-        if not self.expected_actions.issubset(executed):
+        if "complete_task" in self.expected_actions and not self.state.task_completed:
             return 0.0
-
-        # Check task completion if expected
-        if "complete_task" in self.expected_actions:
-            if not self.state.task_completed:
-                return 0.0
-
         return 1.0
-
-
-# ==================== Usage Examples ====================
-
-"""
-Example 1: Basic dynamic tools
-
-metadata = {
-    "tool_implementations": {
-        "search": "search_advanced",      # Use advanced search implementation
-        "calculate": "calculate_safe",    # Use safe calculator
-    },
-    "expected_actions": ["search", "complete_task"],
-}
-
-
-Example 2: With tool providers
-
-metadata = {
-    "tool_providers": ["payment_tools"],  # Load all payment tools
-    "expected_actions": ["process_payment", "complete_task"],
-}
-
-
-Example 3: Mixed static, dynamic, and filtered
-
-metadata = {
-    "tool_implementations": {"search": "search_basic"},
-    "tool_providers": ["analytics_tools"],
-    "enabled_tools": ["get_context", "search", "get_metrics"],  # Filter tools
-    "expected_actions": ["search", "get_metrics"],
-}
-
-
-Example 4: Context-aware task
-
-metadata = {
-    "context": {
-        "user_id": "USER-123",
-        "session_type": "support",
-    },
-    "tool_providers": ["payment_tools"],
-    "expected_actions": ["get_context", "process_payment", "complete_task"],
-}
-"""

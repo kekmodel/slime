@@ -13,9 +13,9 @@ Required tool chain:
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from slime.utils.types import Sample
-
 from .base import BaseEnvironment, tool
+from .env_registry import EnvironmentRegistry
+from .types import ExecutionState
 
 
 @dataclass
@@ -38,67 +38,51 @@ class Order:
 
 
 @dataclass
-class EnvironmentState:
-    """Per-session state"""
+class RetailState(ExecutionState):
+    """Extended state with retail-specific data."""
 
     customers: dict[str, Customer] = field(default_factory=dict)
     orders: dict[str, Order] = field(default_factory=dict)
-    # Track all tool executions for state-based verification
-    customer_info_retrieved: bool = False
-    order_details_retrieved: bool = False
-    policy_checked: bool = False
-    refund_processed: bool = False
-    order_cancelled: bool = False
-    notification_sent: bool = False
-    # Final result submission
-    submitted_result: dict | None = None
 
 
+@EnvironmentRegistry.register("retail_service")
 class RetailServiceEnvironment(BaseEnvironment):
     """
     Retail customer service environment.
     Agent must chain multiple tools in correct order.
     """
 
+    state: RetailState
+    expected_result: dict | None
+
     def __init__(self):
         super().__init__()
-        self.state: EnvironmentState | None = None
-        self.expected_actions: set[str] = set()
-        self.expected_result: dict | None = None
+        self.state = RetailState()
+        self.expected_result = None
 
-    def seed(self, metadata: dict) -> None:
-        """
-        Initialize with task-specific data.
-
-        Supports per-sample tool filtering via:
-        - metadata["enabled_tools"]: Explicit list of enabled tools
-        - metadata["task_type"]: Predefined tool sets ("read_only", "refund", "cancel")
-
-        Example metadata:
-            {"task_type": "read_only"}  # Only get_* tools
-            {"enabled_tools": ["get_customer_info", "get_order_details"]}  # Explicit
-        """
-        # Call parent to handle enabled_tools from metadata
-        super().seed(metadata)
-
-        # Initialize state
-        self.state = EnvironmentState()
-        self._load_mock_data(metadata)
+    def setup(self, metadata: dict) -> None:
+        """Initialize with task-specific data."""
+        # Reset base state and expected_actions
+        self.state = RetailState()
+        self._enabled_tools = None
         self.expected_actions = set(metadata.get("expected_actions", []))
-        self.expected_result = metadata.get("expected_result")  # For submit_result verification
+        self.expected_result = metadata.get("expected_result")
 
-        # Apply task_type based tool filtering (if not already set by enabled_tools)
+        # Handle enabled_tools from metadata
+        if "enabled_tools" in metadata:
+            requested = set(metadata["enabled_tools"])
+            available = set(self._tools.keys())
+            self._enabled_tools = requested & available
+
+        # Load mock data
+        self._load_mock_data(metadata)
+
+        # Apply task_type based tool filtering (if not already set)
         if self._enabled_tools is None and "task_type" in metadata:
             task_type = metadata["task_type"]
             if task_type == "read_only":
-                # Only information retrieval tools
-                self._enabled_tools = {
-                    "get_customer_info",
-                    "get_order_details",
-                    "submit_result",
-                }
+                self._enabled_tools = {"get_customer_info", "get_order_details", "submit_result"}
             elif task_type == "refund":
-                # Full refund workflow tools
                 self._enabled_tools = {
                     "get_customer_info",
                     "get_order_details",
@@ -108,7 +92,6 @@ class RetailServiceEnvironment(BaseEnvironment):
                     "submit_result",
                 }
             elif task_type == "cancel":
-                # Cancellation workflow tools
                 self._enabled_tools = {
                     "get_customer_info",
                     "get_order_details",
@@ -118,13 +101,12 @@ class RetailServiceEnvironment(BaseEnvironment):
                 }
 
     def reset(self) -> None:
-        super().reset()  # Reset enabled_tools
-        self.state = None
-        self.expected_actions = set()
+        super().reset()
+        self.state = RetailState()
         self.expected_result = None
 
     def _load_mock_data(self, metadata: dict) -> None:
-        """Load mock database from metadata"""
+        """Load mock database from metadata."""
         customer_data = metadata.get("customer", {})
         customer = Customer(
             customer_id=customer_data.get("id", "CUST-001"),
@@ -161,7 +143,6 @@ class RetailServiceEnvironment(BaseEnvironment):
         customer = self.state.customers.get(customer_id)
         if not customer:
             return f"Error: Customer {customer_id} not found"
-        self.state.customer_info_retrieved = True
         return f"Customer: {customer.name}, Email: {customer.email}, Tier: {customer.membership_tier}"
 
     @tool(
@@ -176,7 +157,6 @@ class RetailServiceEnvironment(BaseEnvironment):
         order = self.state.orders.get(order_id)
         if not order:
             return f"Error: Order {order_id} not found"
-        self.state.order_details_retrieved = True
         return f"Order {order.order_id}: {order.product_name}, ${order.total_amount:.2f}, Status: {order.status}"
 
     @tool(
@@ -188,7 +168,6 @@ class RetailServiceEnvironment(BaseEnvironment):
         },
     )
     async def check_refund_policy(self, order_id: str) -> str:
-        self.state.policy_checked = True
         order = self.state.orders.get(order_id)
         if not order:
             return f"Error: Order {order_id} not found"
@@ -210,10 +189,7 @@ class RetailServiceEnvironment(BaseEnvironment):
             "type": "object",
             "properties": {
                 "order_id": {"type": "string", "description": "Order ID"},
-                "reason": {
-                    "type": "string",
-                    "description": "Reason for refund",
-                },
+                "reason": {"type": "string", "description": "Reason for refund"},
             },
             "required": ["order_id", "reason"],
         },
@@ -226,7 +202,6 @@ class RetailServiceEnvironment(BaseEnvironment):
             raise ValueError("Already refunded")
 
         order.status = "refunded"
-        self.state.refund_processed = True
         return f"Refund processed: ${order.total_amount:.2f} for '{reason}'"
 
     @tool(
@@ -244,7 +219,6 @@ class RetailServiceEnvironment(BaseEnvironment):
         customer = self.state.customers.get(customer_id)
         if not customer:
             return f"Error: Customer {customer_id} not found"
-        self.state.notification_sent = True
         return f"Notification sent to {customer.email}"
 
     @tool(
@@ -253,10 +227,7 @@ class RetailServiceEnvironment(BaseEnvironment):
             "type": "object",
             "properties": {
                 "order_id": {"type": "string", "description": "Order ID"},
-                "reason": {
-                    "type": "string",
-                    "description": "Cancellation reason",
-                },
+                "reason": {"type": "string", "description": "Cancellation reason"},
             },
             "required": ["order_id", "reason"],
         },
@@ -268,19 +239,13 @@ class RetailServiceEnvironment(BaseEnvironment):
         if order.status != "pending":
             raise ValueError(f"Cannot cancel {order.status} orders")
         order.status = "cancelled"
-        self.state.order_cancelled = True
         return f"Order {order_id} cancelled: {reason}"
 
     @tool(
-        description="Submit the final result to complete the task. Call this after gathering all required information.",
+        description="Submit the final result to complete the task.",
         parameters={
             "type": "object",
-            "properties": {
-                "result": {
-                    "type": "object",
-                    "description": "The final result as a structured object",
-                }
-            },
+            "properties": {"result": {"type": "object", "description": "The final result as a structured object"}},
             "required": ["result"],
         },
     )
@@ -290,38 +255,11 @@ class RetailServiceEnvironment(BaseEnvironment):
 
     # ==================== Verification ====================
 
-    async def verify(self, sample: Sample) -> float:
-        """
-        Binary reward: 1.0 if all conditions met, 0.0 otherwise.
-
-        Verifies:
-        1. All expected_actions were completed (state-based)
-        2. submitted_result matches expected_result (exact match)
-
-        Note: Called from generate() while env.state is still valid.
-        """
-        if not self.state:
+    def verify(self) -> float:
+        """1.0 if all expected_actions executed and result matches, 0.0 otherwise."""
+        if not self.state.has_executed_all(self.expected_actions):
             return 0.0
-
-        # Map action names to state flags
-        action_to_state = {
-            "get_customer_info": self.state.customer_info_retrieved,
-            "get_order_details": self.state.order_details_retrieved,
-            "check_refund_policy": self.state.policy_checked,
-            "process_refund": self.state.refund_processed,
-            "cancel_order": self.state.order_cancelled,
-            "send_notification": self.state.notification_sent,
-            "submit_result": self.state.submitted_result is not None,
-        }
-
-        # 1. Verify all expected actions were completed
-        for action in self.expected_actions:
-            if action in action_to_state and not action_to_state[action]:
-                return 0.0
-
-        # 2. Verify submitted result matches expected (if expected_result is defined)
         if self.expected_result is not None:
             if self.state.submitted_result != self.expected_result:
                 return 0.0
-
         return 1.0

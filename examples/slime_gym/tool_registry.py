@@ -2,66 +2,39 @@
 Dynamic tool registry for slime_gym.
 
 Allows loading tool implementations from metadata at runtime.
-Supports multiple approaches:
+Supports:
 1. Tool Library: Pre-registered implementations selected by name
 2. Tool Providers: Modules/classes that provide sets of tools
-3. Module Path: Dynamic import from dotted path (use with caution)
-
-Example metadata:
-    # Select from pre-registered implementations
-    {"tool_implementations": {"search": "search_v2", "calculate": "calculate_safe"}}
-
-    # Load tool providers
-    {"tool_providers": ["math_tools", "search_tools"]}
-
-    # Dynamic import (requires explicit allowlist)
-    {"tool_modules": ["myproject.tools.custom_tools"]}
+3. Module Path: Dynamic import from dotted path (requires allowlist)
 """
 
+import ast
 import importlib
 import logging
+import operator
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
 from typing import Any
 
-from .gym_types import ToolResult
+from .types import ToolDefinition, ToolResult
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class ToolDefinition:
-    """Definition of a dynamically loadable tool."""
-
-    name: str
-    description: str
-    parameters: dict[str, Any]
-    implementation: Callable[..., Awaitable[str]]
-    # Optional metadata
-    version: str = "1.0"
-    tags: list[str] = field(default_factory=list)
-
-
 class ToolRegistry:
     """
-    Global registry for tool implementations.
+    Registry for tool implementations.
 
     Usage:
-        # Register tools
         registry = ToolRegistry()
-        registry.register("search_v1", search_v1_tool)
-        registry.register("search_v2", search_v2_tool)
+        registry.register("search_v1", search_v1_impl, description="...")
 
-        # In environment.seed():
-        active_tools = registry.load_tools(metadata)
+        # In environment.setup():
+        tools = registry.get_tools(["search_v1", "calculate"])
     """
 
     def __init__(self):
-        # name -> ToolDefinition
         self._tools: dict[str, ToolDefinition] = {}
-        # provider_name -> provider_class/module
         self._providers: dict[str, type | Any] = {}
-        # Allowlist for dynamic module imports (security)
         self._allowed_modules: set[str] = set()
 
     def register(
@@ -84,12 +57,7 @@ class ToolRegistry:
         )
 
     def register_provider(self, name: str, provider: type | Any) -> None:
-        """
-        Register a tool provider (class or module).
-
-        Provider should have methods decorated with @tool or
-        a get_tools() method returning ToolDefinitions.
-        """
+        """Register a tool provider (class or module with get_tools())."""
         self._providers[name] = provider
 
     def allow_module(self, module_path: str) -> None:
@@ -105,17 +73,13 @@ class ToolRegistry:
         return self._providers.get(name)
 
     def list_tools(self, tags: list[str] | None = None) -> list[str]:
-        """List all registered tool names, optionally filtered by tags."""
+        """List registered tool names, optionally filtered by tags."""
         if tags is None:
             return list(self._tools.keys())
         return [name for name, tool in self._tools.items() if any(tag in tool.tags for tag in tags)]
 
     def load_from_module(self, module_path: str) -> dict[str, ToolDefinition]:
-        """
-        Dynamically load tools from a module path.
-
-        Security: Only loads from allowed modules.
-        """
+        """Dynamically load tools from an allowed module."""
         if module_path not in self._allowed_modules:
             logger.warning(f"Module {module_path} not in allowlist, skipping")
             return {}
@@ -124,13 +88,11 @@ class ToolRegistry:
             module = importlib.import_module(module_path)
             tools = {}
 
-            # Look for TOOLS dict or get_tools() function
             if hasattr(module, "TOOLS"):
                 tools.update(module.TOOLS)
             if hasattr(module, "get_tools"):
                 tools.update(module.get_tools())
 
-            # Look for @tool decorated functions
             for name in dir(module):
                 obj = getattr(module, name)
                 if hasattr(obj, "_tool_schema"):
@@ -148,13 +110,23 @@ class ToolRegistry:
             return {}
 
 
-# Global registry instance
-_global_registry = ToolRegistry()
+# Global registry with lazy initialization
+_global_registry: ToolRegistry | None = None
 
 
 def get_registry() -> ToolRegistry:
     """Get the global tool registry."""
+    global _global_registry
+    if _global_registry is None:
+        _global_registry = ToolRegistry()
+        _register_default_tools(_global_registry)
     return _global_registry
+
+
+def set_registry(registry: ToolRegistry) -> None:
+    """Set the global registry (useful for testing)."""
+    global _global_registry
+    _global_registry = registry
 
 
 def register_tool(
@@ -164,17 +136,10 @@ def register_tool(
     version: str = "1.0",
     tags: list[str] | None = None,
 ) -> Callable:
-    """
-    Decorator to register a function as a tool in the global registry.
-
-    Usage:
-        @register_tool("search_v2", description="Advanced search", tags=["search"])
-        async def search_v2(query: str) -> str:
-            return f"Results for: {query}"
-    """
+    """Decorator to register a function in the global registry."""
 
     def decorator(func: Callable[..., Awaitable[str]]) -> Callable:
-        _global_registry.register(
+        get_registry().register(
             name=name,
             implementation=func,
             description=description,
@@ -189,40 +154,30 @@ def register_tool(
 
 class DynamicToolMixin:
     """
-    Mixin class for environments that support dynamic tool loading.
-
-    Add this to your environment class to enable loading tools from metadata.
+    Mixin for environments that support dynamic tool loading.
 
     Usage:
         class MyEnvironment(DynamicToolMixin, BaseEnvironment):
-            def seed(self, metadata: dict) -> None:
-                super().seed(metadata)
+            def setup(self, metadata: dict) -> None:
+                super().setup(metadata)
                 self.load_dynamic_tools(metadata)
     """
 
-    def __init__(self):
+    def __init__(self, registry: ToolRegistry | None = None):
         super().__init__()
-        # Dynamic tools loaded from metadata
+        self._registry = registry or get_registry()
         self._dynamic_tools: dict[str, ToolDefinition] = {}
         self._dynamic_tool_schemas: dict[str, dict] = {}
 
     def load_dynamic_tools(self, metadata: dict) -> None:
-        """
-        Load tools from metadata.
-
-        Supports:
-        - tool_implementations: {"tool_name": "registry_name"}
-        - tool_providers: ["provider1", "provider2"]
-        - tool_modules: ["module.path"] (requires allowlist)
-        """
-        registry = get_registry()
+        """Load tools from metadata."""
         self._dynamic_tools.clear()
         self._dynamic_tool_schemas.clear()
 
         # 1. Load from tool_implementations mapping
         if "tool_implementations" in metadata:
             for tool_name, impl_name in metadata["tool_implementations"].items():
-                tool_def = registry.get(impl_name)
+                tool_def = self._registry.get(impl_name)
                 if tool_def:
                     self._dynamic_tools[tool_name] = tool_def
                     self._dynamic_tool_schemas[tool_name] = {
@@ -234,53 +189,34 @@ class DynamicToolMixin:
                         },
                     }
                 else:
-                    logger.warning(f"Tool implementation '{impl_name}' not found in registry")
+                    logger.warning(f"Tool implementation '{impl_name}' not found")
 
         # 2. Load from tool providers
         if "tool_providers" in metadata:
             for provider_name in metadata["tool_providers"]:
-                provider = registry.get_provider(provider_name)
+                provider = self._registry.get_provider(provider_name)
                 if provider is None:
                     logger.warning(f"Tool provider '{provider_name}' not found")
                     continue
 
-                # Get tools from provider
                 if hasattr(provider, "get_tools"):
                     for tool_def in provider.get_tools():
                         self._dynamic_tools[tool_def.name] = tool_def
-                        self._dynamic_tool_schemas[tool_def.name] = {
-                            "type": "function",
-                            "function": {
-                                "name": tool_def.name,
-                                "description": tool_def.description,
-                                "parameters": tool_def.parameters,
-                            },
-                        }
+                        self._dynamic_tool_schemas[tool_def.name] = tool_def.to_schema()
 
         # 3. Load from modules (requires allowlist)
         if "tool_modules" in metadata:
             for module_path in metadata["tool_modules"]:
-                loaded = registry.load_from_module(module_path)
+                loaded = self._registry.load_from_module(module_path)
                 for name, tool_def in loaded.items():
                     self._dynamic_tools[name] = tool_def
-                    self._dynamic_tool_schemas[name] = {
-                        "type": "function",
-                        "function": {
-                            "name": name,
-                            "description": tool_def.description,
-                            "parameters": tool_def.parameters,
-                        },
-                    }
+                    self._dynamic_tool_schemas[name] = tool_def.to_schema()
 
     def get_tools(self) -> list[dict]:
         """Return combined static and dynamic tool schemas."""
-        # Get static tools from parent
         static_tools = super().get_tools()
-
-        # Add dynamic tools
         dynamic_tools = list(self._dynamic_tool_schemas.values())
 
-        # Filter by _enabled_tools if set
         all_tools = static_tools + dynamic_tools
         if hasattr(self, "_enabled_tools") and self._enabled_tools is not None:
             all_tools = [t for t in all_tools if t["function"]["name"] in self._enabled_tools]
@@ -289,103 +225,132 @@ class DynamicToolMixin:
 
     async def execute_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         """Execute tool - checks dynamic tools first, then static."""
-        # Check if it's a dynamic tool
         if name in self._dynamic_tools:
-            # Check enabled status
             if hasattr(self, "_enabled_tools") and self._enabled_tools is not None:
                 if name not in self._enabled_tools:
-                    return ToolResult(
-                        output=f"Error: Tool '{name}' is not available for this task.",
-                        success=False,
-                    )
+                    return ToolResult(output=f"Error: Tool '{name}' is not available.", success=False)
 
             try:
                 tool_def = self._dynamic_tools[name]
                 result = await tool_def.implementation(**arguments)
+                # Track execution in state
+                if hasattr(self, "state"):
+                    self.state.record_execution(name, result)
                 return ToolResult(output=str(result), success=True)
             except Exception as e:
                 return ToolResult(output=f"Error: {e}", success=False)
 
-        # Fall back to static tools
         return await super().execute_tool(name, arguments)
 
 
-# ==================== Example Tool Implementations ====================
+# ==================== Safe Math Evaluator ====================
 
 
-@register_tool(
-    name="search_basic",
-    description="Basic search functionality",
-    parameters={
-        "type": "object",
-        "properties": {"query": {"type": "string", "description": "Search query"}},
-        "required": ["query"],
-    },
-    tags=["search", "basic"],
-)
-async def search_basic(query: str) -> str:
-    """Basic search implementation."""
-    return f"Basic search results for: {query}"
+class SafeMathEvaluator:
+    """
+    Safe math expression evaluator without eval().
+
+    Supports: +, -, *, /, ** (power), unary - and +
+    Only allows numbers and basic arithmetic operations.
+    """
+
+    OPERATORS = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+    }
+
+    @classmethod
+    def evaluate(cls, expression: str) -> float:
+        """Safely evaluate a math expression."""
+        try:
+            tree = ast.parse(expression, mode="eval")
+            return cls._eval_node(tree.body)
+        except (SyntaxError, ValueError, TypeError) as e:
+            raise ValueError(f"Invalid expression: {e}") from e
+
+    @classmethod
+    def _eval_node(cls, node: ast.AST) -> float:
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, int | float):
+                return float(node.value)
+            raise ValueError(f"Unsupported constant type: {type(node.value)}")
+
+        if isinstance(node, ast.BinOp):
+            if type(node.op) not in cls.OPERATORS:
+                raise ValueError(f"Unsupported operator: {type(node.op).__name__}")
+            left = cls._eval_node(node.left)
+            right = cls._eval_node(node.right)
+            return cls.OPERATORS[type(node.op)](left, right)
+
+        if isinstance(node, ast.UnaryOp):
+            if type(node.op) not in cls.OPERATORS:
+                raise ValueError(f"Unsupported operator: {type(node.op).__name__}")
+            operand = cls._eval_node(node.operand)
+            return cls.OPERATORS[type(node.op)](operand)
+
+        raise ValueError(f"Unsupported expression type: {type(node).__name__}")
 
 
-@register_tool(
-    name="search_advanced",
-    description="Advanced search with filters",
-    parameters={
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "Search query"},
-            "filters": {"type": "object", "description": "Search filters"},
+# ==================== Default Tool Implementations ====================
+
+
+def _register_default_tools(registry: ToolRegistry) -> None:
+    """Register default tool implementations."""
+
+    async def search_basic(query: str) -> str:
+        return f"Basic search results for: {query}"
+
+    async def search_advanced(query: str, filters: dict | None = None) -> str:
+        filter_str = f" with filters {filters}" if filters else ""
+        return f"Advanced search results for: {query}{filter_str}"
+
+    async def calculate_safe(expression: str) -> str:
+        try:
+            result = SafeMathEvaluator.evaluate(expression)
+            return f"Result: {result}"
+        except ValueError as e:
+            return f"Calculation error: {e}"
+
+    registry.register(
+        name="search_basic",
+        implementation=search_basic,
+        description="Basic search functionality",
+        parameters={
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "Search query"}},
+            "required": ["query"],
         },
-        "required": ["query"],
-    },
-    tags=["search", "advanced"],
-)
-async def search_advanced(query: str, filters: dict | None = None) -> str:
-    """Advanced search implementation with filters."""
-    filter_str = f" with filters {filters}" if filters else ""
-    return f"Advanced search results for: {query}{filter_str}"
+        tags=["search", "basic"],
+    )
 
+    registry.register(
+        name="search_advanced",
+        implementation=search_advanced,
+        description="Advanced search with filters",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query"},
+                "filters": {"type": "object", "description": "Search filters"},
+            },
+            "required": ["query"],
+        },
+        tags=["search", "advanced"],
+    )
 
-@register_tool(
-    name="calculate_safe",
-    description="Safe calculator (no eval)",
-    parameters={
-        "type": "object",
-        "properties": {"expression": {"type": "string", "description": "Math expression"}},
-        "required": ["expression"],
-    },
-    tags=["math", "safe"],
-)
-async def calculate_safe(expression: str) -> str:
-    """Safe calculation without eval."""
-    # Simple implementation - in production use a proper math parser
-    try:
-        # Only allow simple arithmetic
-        import ast
-
-        tree = ast.parse(expression, mode="eval")
-        # Validate only contains numbers and operators
-        for node in ast.walk(tree):
-            if not isinstance(
-                node,
-                (
-                    ast.Expression,
-                    ast.BinOp,
-                    ast.UnaryOp,
-                    ast.Num,
-                    ast.Add,
-                    ast.Sub,
-                    ast.Mult,
-                    ast.Div,
-                    ast.Pow,
-                    ast.USub,
-                    ast.UAdd,
-                    ast.Constant,
-                ),
-            ):
-                raise ValueError(f"Unsafe operation: {type(node).__name__}")
-        result = eval(compile(tree, "<string>", "eval"))
-        return f"Result: {result}"
-    except Exception as e:
-        return f"Calculation error: {e}"
+    registry.register(
+        name="calculate_safe",
+        implementation=calculate_safe,
+        description="Safe calculator (basic arithmetic only)",
+        parameters={
+            "type": "object",
+            "properties": {"expression": {"type": "string", "description": "Math expression"}},
+            "required": ["expression"],
+        },
+        tags=["math", "safe"],
+    )

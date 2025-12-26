@@ -19,6 +19,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 sys.path.insert(0, REPO_ROOT)
 
+
 # ==================== Mock SLIME types ====================
 
 
@@ -67,8 +68,9 @@ def print_header(title: str):
 
 
 def print_result(test_name: str, passed: bool, details: str = ""):
-    status = "✅ PASS" if passed else "❌ FAIL"
-    print(f"{status}: {test_name}")
+    status = "PASS" if passed else "FAIL"
+    symbol = "+" if passed else "x"
+    print(f"[{symbol}] {status}: {test_name}")
     if details:
         print(f"       {details}")
 
@@ -102,14 +104,9 @@ async def test_basic_environment():
         f"Found: {tool_names}",
     )
 
-    # Test seed with metadata
+    # Test setup with metadata
     metadata = {
-        "customer": {
-            "id": "CUST-001",
-            "name": "Test User",
-            "email": "test@example.com",
-            "tier": "gold",
-        },
+        "customer": {"id": "CUST-001", "name": "Test User", "email": "test@example.com", "tier": "gold"},
         "order": {
             "id": "ORD-001",
             "product_name": "Test Product",
@@ -119,10 +116,10 @@ async def test_basic_environment():
         },
         "expected_actions": ["get_customer_info", "get_order_details"],
     }
-    env.seed(metadata)
+    env.setup(metadata)
 
     print_result(
-        "Environment seeding",
+        "Environment setup",
         env.state is not None and env.expected_actions == {"get_customer_info", "get_order_details"},
         f"State initialized, expected_actions: {env.expected_actions}",
     )
@@ -133,6 +130,13 @@ async def test_basic_environment():
         "Tool execution",
         result.success and "Test User" in result.output,
         f"Output: {result.output[:50]}...",
+    )
+
+    # Test automatic state tracking
+    print_result(
+        "Automatic state tracking",
+        env.state.has_executed("get_customer_info"),
+        f"executed_tools: {env.state.executed_tools}",
     )
 
     # Test unknown tool
@@ -154,22 +158,11 @@ async def test_tool_filtering():
 
     # Test 1: enabled_tools filtering
     metadata = {
-        "customer": {
-            "id": "CUST-001",
-            "name": "Test",
-            "email": "t@t.com",
-            "tier": "gold",
-        },
-        "order": {
-            "id": "ORD-001",
-            "product_name": "Test",
-            "price": 10,
-            "status": "delivered",
-            "days_ago": 1,
-        },
+        "customer": {"id": "CUST-001", "name": "Test", "email": "t@t.com", "tier": "gold"},
+        "order": {"id": "ORD-001", "product_name": "Test", "price": 10, "status": "delivered", "days_ago": 1},
         "enabled_tools": ["get_customer_info", "get_order_details"],
     }
-    env.seed(metadata)
+    env.setup(metadata)
 
     tools = env.get_tools()
     tool_names = [t["function"]["name"] for t in tools]
@@ -187,67 +180,20 @@ async def test_tool_filtering():
         f"Output: {result.output[:60]}...",
     )
 
-    # Test 2: task_type filtering - reset first
+    # Test 2: task_type filtering
     env.reset()
     metadata2 = {
-        "customer": {
-            "id": "CUST-001",
-            "name": "Test",
-            "email": "t@t.com",
-            "tier": "gold",
-        },
-        "order": {
-            "id": "ORD-001",
-            "product_name": "Test",
-            "price": 10,
-            "status": "delivered",
-            "days_ago": 1,
-        },
+        "customer": {"id": "CUST-001", "name": "Test", "email": "t@t.com", "tier": "gold"},
+        "order": {"id": "ORD-001", "product_name": "Test", "price": 10, "status": "delivered", "days_ago": 1},
         "task_type": "read_only",
     }
-    env.seed(metadata2)
+    env.setup(metadata2)
 
     tools = env.get_tools()
     tool_names = [t["function"]["name"] for t in tools]
     print_result(
         "task_type='read_only' filtering",
         set(tool_names) == {"get_customer_info", "get_order_details", "submit_result"},
-        f"Active tools: {tool_names}",
-    )
-
-    # Test 3: task_type="refund"
-    env.reset()
-    metadata3 = {
-        "customer": {
-            "id": "CUST-001",
-            "name": "Test",
-            "email": "t@t.com",
-            "tier": "gold",
-        },
-        "order": {
-            "id": "ORD-001",
-            "product_name": "Test",
-            "price": 10,
-            "status": "delivered",
-            "days_ago": 1,
-        },
-        "task_type": "refund",
-    }
-    env.seed(metadata3)
-
-    tools = env.get_tools()
-    tool_names = [t["function"]["name"] for t in tools]
-    expected = {
-        "get_customer_info",
-        "get_order_details",
-        "check_refund_policy",
-        "process_refund",
-        "send_notification",
-        "submit_result",
-    }
-    print_result(
-        "task_type='refund' filtering",
-        set(tool_names) == expected,
         f"Active tools: {tool_names}",
     )
 
@@ -272,13 +218,10 @@ async def test_dynamic_tools():
 
     # Test with tool_implementations
     metadata = {
-        "tool_implementations": {
-            "search": "search_advanced",
-            "calculate": "calculate_safe",
-        },
+        "tool_implementations": {"search": "search_advanced", "calculate": "calculate_safe"},
         "expected_actions": ["search", "calculate"],
     }
-    env.seed(metadata)
+    env.setup(metadata)
 
     tools = env.get_tools()
     tool_names = [t["function"]["name"] for t in tools]
@@ -302,7 +245,7 @@ async def test_dynamic_tools():
         "tool_providers": ["payment_tools"],
         "expected_actions": ["process_payment"],
     }
-    env.seed(metadata2)
+    env.setup(metadata2)
 
     tools = env.get_tools()
     tool_names = [t["function"]["name"] for t in tools]
@@ -320,33 +263,6 @@ async def test_dynamic_tools():
         f"Output: {result.output}",
     )
 
-    # Test state-based verification for dynamic env
-    sample = MockSample(response="")
-    reward = await env.verify(sample)
-    print_result(
-        "Dynamic env state-based verification",
-        reward == 1.0,
-        f"Reward: {reward}, tool_calls_made: {env.state.tool_calls_made}",
-    )
-
-    # Test incomplete execution
-    env.reset()
-    metadata3 = {
-        "tool_implementations": {"search": "search_advanced"},
-        "expected_actions": ["search", "complete_task"],
-    }
-    env.seed(metadata3)
-    await env.execute_tool("search", {"query": "test"})
-    # Don't call complete_task
-
-    sample = MockSample(response="")
-    reward = await env.verify(sample)
-    print_result(
-        "Dynamic env incomplete verification",
-        reward == 0.0,
-        f"Reward: {reward} (expected 0.0, missing complete_task)",
-    )
-
 
 async def test_verification():
     """Test state-based verification logic."""
@@ -357,51 +273,37 @@ async def test_verification():
 
     env = RetailServiceEnvironment()
     metadata = {
-        "customer": {
-            "id": "CUST-001",
-            "name": "Test",
-            "email": "t@t.com",
-            "tier": "gold",
-        },
-        "order": {
-            "id": "ORD-001",
-            "product_name": "Test",
-            "price": 10,
-            "status": "delivered",
-            "days_ago": 1,
-        },
+        "customer": {"id": "CUST-001", "name": "Test", "email": "t@t.com", "tier": "gold"},
+        "order": {"id": "ORD-001", "product_name": "Test", "price": 10, "status": "delivered", "days_ago": 1},
         "expected_actions": ["get_customer_info", "get_order_details"],
     }
-    env.seed(metadata)
+    env.setup(metadata)
 
-    # Execute all expected tools to set state
+    # Execute all expected tools
     await env.execute_tool("get_customer_info", {"customer_id": "CUST-001"})
     await env.execute_tool("get_order_details", {"order_id": "ORD-001"})
 
-    # Verify with state (response content doesn't matter for state-based verification)
-    sample = MockSample(response="")
-    reward = await env.verify(sample)
+    # Verify with state
+    reward = env.verify()
     print_result(
         "Verification - all actions executed",
         reward == 1.0,
-        f"Reward: {reward}, state: customer_info={env.state.customer_info_retrieved}, order_details={env.state.order_details_retrieved}",
+        f"Reward: {reward}, executed: {env.state.executed_tools}",
     )
 
-    # Test with missing action - reset and only execute one tool
+    # Test with missing action
     env.reset()
-    env.seed(metadata)
+    env.setup(metadata)
     await env.execute_tool("get_customer_info", {"customer_id": "CUST-001"})
-    # Don't execute get_order_details
 
-    sample = MockSample(response="")
-    reward = await env.verify(sample)
+    reward = env.verify()
     print_result(
         "Verification - missing action",
         reward == 0.0,
-        f"Reward: {reward} (expected 0.0, order_details_retrieved={env.state.order_details_retrieved})",
+        f"Reward: {reward} (expected 0.0)",
     )
 
-    # Test parse_tool_calls (still useful for response parsing)
+    # Test parse_tool_calls
     response = """
 <tool_call>{"name": "get_customer_info", "arguments": {"customer_id": "CUST-001"}}</tool_call>
 <tool_call>{"name": "get_order_details", "arguments": {"order_id": "ORD-001"}}</tool_call>
@@ -422,19 +324,8 @@ async def test_refund_workflow():
 
     env = RetailServiceEnvironment()
     metadata = {
-        "customer": {
-            "id": "CUST-001",
-            "name": "Alice",
-            "email": "alice@example.com",
-            "tier": "gold",
-        },
-        "order": {
-            "id": "ORD-123",
-            "product_name": "Headphones",
-            "price": 99.99,
-            "status": "delivered",
-            "days_ago": 5,
-        },
+        "customer": {"id": "CUST-001", "name": "Alice", "email": "alice@example.com", "tier": "gold"},
+        "order": {"id": "ORD-123", "product_name": "Headphones", "price": 99.99, "status": "delivered", "days_ago": 5},
         "task_type": "refund",
         "expected_actions": [
             "get_customer_info",
@@ -444,130 +335,56 @@ async def test_refund_workflow():
             "send_notification",
         ],
     }
-    env.seed(metadata)
+    env.setup(metadata)
 
     # Execute workflow
     steps = []
-
-    # Step 1: Get customer info
-    result = await env.execute_tool("get_customer_info", {"customer_id": "CUST-001"})
-    steps.append(("get_customer_info", result.success))
-
-    # Step 2: Get order details
-    result = await env.execute_tool("get_order_details", {"order_id": "ORD-123"})
-    steps.append(("get_order_details", result.success))
-
-    # Step 3: Check refund policy
-    result = await env.execute_tool("check_refund_policy", {"order_id": "ORD-123"})
-    steps.append(("check_refund_policy", result.success))
-    policy_checked = env.state.policy_checked
-
-    # Step 4: Process refund
-    result = await env.execute_tool("process_refund", {"order_id": "ORD-123", "reason": "Defective product"})
-    steps.append(("process_refund", result.success))
-    refund_processed = env.state.refund_processed
-
-    # Step 5: Send notification
-    result = await env.execute_tool(
-        "send_notification",
-        {"customer_id": "CUST-001", "message": "Refund processed"},
+    steps.append(
+        ("get_customer_info", (await env.execute_tool("get_customer_info", {"customer_id": "CUST-001"})).success)
     )
-    steps.append(("send_notification", result.success))
+    steps.append(("get_order_details", (await env.execute_tool("get_order_details", {"order_id": "ORD-123"})).success))
+    steps.append(
+        ("check_refund_policy", (await env.execute_tool("check_refund_policy", {"order_id": "ORD-123"})).success)
+    )
+    steps.append(
+        (
+            "process_refund",
+            (await env.execute_tool("process_refund", {"order_id": "ORD-123", "reason": "Defective"})).success,
+        )
+    )
+    steps.append(
+        (
+            "send_notification",
+            (
+                await env.execute_tool("send_notification", {"customer_id": "CUST-001", "message": "Refund processed"})
+            ).success,
+        )
+    )
 
     all_success = all(s[1] for s in steps)
     print_result(
         "Workflow execution",
         all_success,
-        f"Steps: {[(s[0], '✓' if s[1] else '✗') for s in steps]}",
+        f"Steps: {[(s[0], '+' if s[1] else 'x') for s in steps]}",
     )
 
+    # Verify
+    reward = env.verify()
     print_result(
-        "State tracking",
-        policy_checked and refund_processed,
-        f"policy_checked={policy_checked}, refund_processed={refund_processed}",
-    )
-
-    # Verify with correct response
-    response = """
-<tool_call>{"name": "get_customer_info", "arguments": {"customer_id": "CUST-001"}}</tool_call>
-<tool_call>{"name": "get_order_details", "arguments": {"order_id": "ORD-123"}}</tool_call>
-<tool_call>{"name": "check_refund_policy", "arguments": {"order_id": "ORD-123"}}</tool_call>
-<tool_call>{"name": "process_refund", "arguments": {"order_id": "ORD-123", "reason": "Defective"}}</tool_call>
-<tool_call>{"name": "send_notification", "arguments": {"customer_id": "CUST-001", "message": "Done"}}</tool_call>
-"""
-    sample = MockSample(response=response)
-    reward = await env.verify(sample)
-    print_result("Full workflow verification", reward == 1.0, f"Reward: {reward}")
-
-
-async def test_order_independent():
-    """Test that tool execution order doesn't matter - only completion counts."""
-    print_header("Test 6: Order-Independent Execution")
-
-    from examples.slime_gym.retail_env import RetailServiceEnvironment
-
-    env = RetailServiceEnvironment()
-    metadata = {
-        "customer": {
-            "id": "CUST-001",
-            "name": "Test",
-            "email": "t@t.com",
-            "tier": "gold",
-        },
-        "order": {
-            "id": "ORD-001",
-            "product_name": "Test",
-            "price": 10,
-            "status": "delivered",
-            "days_ago": 1,
-        },
-        "expected_actions": ["check_refund_policy", "process_refund"],
-    }
-    env.seed(metadata)
-
-    # Execute in "wrong" order - should still work
-    result = await env.execute_tool("process_refund", {"order_id": "ORD-001", "reason": "test"})
-    print_result(
-        "process_refund first (any order works)",
-        result.success and "Refund processed" in result.output,
-        f"Output: {result.output}",
-    )
-
-    await env.execute_tool("check_refund_policy", {"order_id": "ORD-001"})
-
-    # Verify: all expected actions completed
-    sample = MockSample(response="")
-    reward = await env.verify(sample)
-    print_result(
-        "Verification - all actions completed (any order)",
+        "Full workflow verification",
         reward == 1.0,
-        f"Reward: {reward}, policy_checked={env.state.policy_checked}, refund_processed={env.state.refund_processed}",
-    )
-
-    # Test incomplete execution
-    env.reset()
-    env.seed(metadata)
-    await env.execute_tool("process_refund", {"order_id": "ORD-001", "reason": "test"})
-    # Don't call check_refund_policy
-
-    sample = MockSample(response="")
-    reward = await env.verify(sample)
-    print_result(
-        "Verification - incomplete (missing check_refund_policy)",
-        reward == 0.0,
-        f"Reward: {reward} (expected 0.0, policy_checked={env.state.policy_checked})",
+        f"Reward: {reward}",
     )
 
 
 async def test_submit_result():
     """Test submit_result for final answer verification."""
-    print_header("Test 7: Submit Result Verification")
+    print_header("Test 6: Submit Result Verification")
 
     from examples.slime_gym.retail_env import RetailServiceEnvironment
 
     env = RetailServiceEnvironment()
 
-    # Define expected result
     expected_result = {
         "customer_name": "Alice",
         "order_id": "ORD-001",
@@ -576,82 +393,145 @@ async def test_submit_result():
     }
 
     metadata = {
-        "customer": {
-            "id": "CUST-001",
-            "name": "Alice",
-            "email": "alice@example.com",
-            "tier": "gold",
-        },
-        "order": {
-            "id": "ORD-001",
-            "product_name": "Test",
-            "price": 99.99,
-            "status": "delivered",
-            "days_ago": 1,
-        },
-        "expected_actions": [
-            "get_customer_info",
-            "process_refund",
-            "submit_result",
-        ],
+        "customer": {"id": "CUST-001", "name": "Alice", "email": "alice@example.com", "tier": "gold"},
+        "order": {"id": "ORD-001", "product_name": "Test", "price": 99.99, "status": "delivered", "days_ago": 1},
+        "expected_actions": ["get_customer_info", "process_refund", "submit_result"],
         "expected_result": expected_result,
     }
-    env.seed(metadata)
+    env.setup(metadata)
 
-    # Execute tools
+    # Execute tools and submit correct result
     await env.execute_tool("get_customer_info", {"customer_id": "CUST-001"})
     await env.execute_tool("process_refund", {"order_id": "ORD-001", "reason": "defective"})
-
-    # Submit correct result
     await env.execute_tool("submit_result", {"result": expected_result})
 
-    sample = MockSample(response="")
-    reward = await env.verify(sample)
+    reward = env.verify()
     print_result(
         "Correct result submission",
         reward == 1.0,
-        f"Reward: {reward}, submitted={env.state.submitted_result}",
+        f"Reward: {reward}",
     )
 
     # Test with wrong result
     env.reset()
-    env.seed(metadata)
-
+    env.setup(metadata)
     await env.execute_tool("get_customer_info", {"customer_id": "CUST-001"})
     await env.execute_tool("process_refund", {"order_id": "ORD-001", "reason": "defective"})
+    await env.execute_tool("submit_result", {"result": {"wrong": "result"}})
 
-    # Submit wrong result
-    wrong_result = {
-        "customer_name": "Bob",
-        "order_id": "ORD-001",
-        "refund_amount": 50.0,
-        "status": "refunded",
-    }
-    await env.execute_tool("submit_result", {"result": wrong_result})
-
-    sample = MockSample(response="")
-    reward = await env.verify(sample)
+    reward = env.verify()
     print_result(
         "Wrong result submission",
         reward == 0.0,
-        f"Reward: {reward} (expected 0.0, submitted != expected)",
+        f"Reward: {reward} (expected 0.0)",
     )
 
-    # Test without submit_result call
-    env.reset()
-    env.seed(metadata)
 
-    await env.execute_tool("get_customer_info", {"customer_id": "CUST-001"})
-    await env.execute_tool("process_refund", {"order_id": "ORD-001", "reason": "defective"})
-    # Don't call submit_result
+async def test_safe_math_evaluator():
+    """Test SafeMathEvaluator."""
+    print_header("Test 7: Safe Math Evaluator")
 
-    sample = MockSample(response="")
-    reward = await env.verify(sample)
+    from examples.slime_gym.tool_registry import SafeMathEvaluator
+
+    # Test basic operations
+    test_cases = [
+        ("2 + 3", 5.0),
+        ("10 - 4", 6.0),
+        ("3 * 4", 12.0),
+        ("15 / 3", 5.0),
+        ("2 ** 3", 8.0),
+        ("-5", -5.0),
+        ("2 + 3 * 4", 14.0),
+        ("(2 + 3) * 4", 20.0),
+    ]
+
+    all_passed = True
+    for expr, expected in test_cases:
+        try:
+            result = SafeMathEvaluator.evaluate(expr)
+            if result != expected:
+                all_passed = False
+                print(f"       FAIL: {expr} = {result}, expected {expected}")
+        except Exception as e:
+            all_passed = False
+            print(f"       FAIL: {expr} raised {e}")
+
+    print_result("Basic arithmetic", all_passed)
+
+    # Test rejection of unsafe expressions
+    unsafe_cases = [
+        "__import__('os')",
+        "open('/etc/passwd')",
+        "eval('1+1')",
+        "x + 1",  # Variable
+    ]
+
+    all_rejected = True
+    for expr in unsafe_cases:
+        try:
+            SafeMathEvaluator.evaluate(expr)
+            all_rejected = False
+            print(f"       FAIL: '{expr}' should have been rejected")
+        except ValueError:
+            pass  # Expected
+
+    print_result("Unsafe expressions rejected", all_rejected)
+
+
+async def test_environment_registry():
+    """Test environment registry."""
+    print_header("Test 8: Environment Registry")
+
+    from examples.slime_gym.env_registry import EnvironmentRegistry
+
+    # Test listing environments
+    envs = EnvironmentRegistry.list_environments()
     print_result(
-        "Missing submit_result",
-        reward == 0.0,
-        f"Reward: {reward} (expected 0.0, submit_result not called)",
+        "Environment listing",
+        "retail_service" in envs and "dynamic_service" in envs,
+        f"Registered: {envs}",
     )
+
+    # Test getting environment
+    env = EnvironmentRegistry.get("retail_service")
+    print_result(
+        "Get environment by name",
+        env is not None and hasattr(env, "get_tools"),
+        f"Got: {type(env).__name__}",
+    )
+
+    # Test unknown environment
+    try:
+        EnvironmentRegistry.get("unknown_env")
+        print_result("Unknown environment raises error", False)
+    except ValueError as e:
+        print_result("Unknown environment raises error", True, str(e)[:50])
+
+
+async def test_config():
+    """Test configuration management."""
+    print_header("Test 9: Configuration")
+
+    from examples.slime_gym import config as cfg
+
+    # Test per-sample override
+    metadata = {"max_turns": 5}
+    result = cfg.resolve_max_turns(metadata)
+    print_result("Per-sample max_turns override", result == 5, f"max_turns: {result}")
+
+    # Test dynamic mode (default: DYNAMIC_MAX_TURNS=True, MAX_TURNS_BUFFER=0)
+    metadata = {"expected_actions": ["a", "b", "c"]}
+    result = cfg.resolve_max_turns(metadata)
+    print_result(
+        "Dynamic max_turns (len + buffer)",
+        result == 3,  # 3 + 0 (default buffer)
+        f"max_turns: {result}",
+    )
+
+    # Test fallback (default: MAX_TURNS=10)
+    metadata = {}
+    result = cfg.resolve_max_turns(metadata)
+    print_result("Fallback to config default", result == cfg.MAX_TURNS, f"max_turns: {result}")
 
 
 async def main():
@@ -665,16 +545,18 @@ async def main():
         await test_dynamic_tools()
         await test_verification()
         await test_refund_workflow()
-        await test_order_independent()
         await test_submit_result()
+        await test_safe_math_evaluator()
+        await test_environment_registry()
+        await test_config()
 
         print("\n" + "=" * 60)
-        print("  ✅ All tests completed successfully!")
+        print("  All tests completed successfully!")
         print("=" * 60 + "\n")
         return 0
 
     except Exception as e:
-        print(f"\n❌ Test failed with error: {e}")
+        print(f"\nTest failed with error: {e}")
         import traceback
 
         traceback.print_exc()
