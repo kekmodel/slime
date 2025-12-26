@@ -41,8 +41,14 @@ class PaymentToolProvider:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "amount": {"type": "number", "description": "Payment amount"},
-                        "method": {"type": "string", "description": "Payment method"},
+                        "amount": {
+                            "type": "number",
+                            "description": "Payment amount",
+                        },
+                        "method": {
+                            "type": "string",
+                            "description": "Payment method",
+                        },
                     },
                     "required": ["amount", "method"],
                 },
@@ -55,8 +61,14 @@ class PaymentToolProvider:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "transaction_id": {"type": "string", "description": "Original transaction ID"},
-                        "amount": {"type": "number", "description": "Refund amount"},
+                        "transaction_id": {
+                            "type": "string",
+                            "description": "Original transaction ID",
+                        },
+                        "amount": {
+                            "type": "number",
+                            "description": "Refund amount",
+                        },
                     },
                     "required": ["transaction_id"],
                 },
@@ -87,8 +99,14 @@ class AnalyticsToolProvider:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "metric_name": {"type": "string", "description": "Name of the metric"},
-                        "time_range": {"type": "string", "description": "Time range (e.g., '7d', '30d')"},
+                        "metric_name": {
+                            "type": "string",
+                            "description": "Name of the metric",
+                        },
+                        "time_range": {
+                            "type": "string",
+                            "description": "Time range (e.g., '7d', '30d')",
+                        },
                     },
                     "required": ["metric_name"],
                 },
@@ -190,7 +208,12 @@ class DynamicServiceEnvironment(DynamicToolMixin, BaseEnvironment):
         description="Get information about the current context",
         parameters={
             "type": "object",
-            "properties": {"key": {"type": "string", "description": "Context key to retrieve"}},
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "Context key to retrieve",
+                }
+            },
             "required": ["key"],
         },
     )
@@ -222,7 +245,12 @@ class DynamicServiceEnvironment(DynamicToolMixin, BaseEnvironment):
         description="Mark the current task as completed",
         parameters={
             "type": "object",
-            "properties": {"summary": {"type": "string", "description": "Task completion summary"}},
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "description": "Task completion summary",
+                }
+            },
             "required": ["summary"],
         },
     )

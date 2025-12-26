@@ -92,7 +92,11 @@ class RetailServiceEnvironment(BaseEnvironment):
             task_type = metadata["task_type"]
             if task_type == "read_only":
                 # Only information retrieval tools
-                self._enabled_tools = {"get_customer_info", "get_order_details", "submit_result"}
+                self._enabled_tools = {
+                    "get_customer_info",
+                    "get_order_details",
+                    "submit_result",
+                }
             elif task_type == "refund":
                 # Full refund workflow tools
                 self._enabled_tools = {
@@ -206,7 +210,10 @@ class RetailServiceEnvironment(BaseEnvironment):
             "type": "object",
             "properties": {
                 "order_id": {"type": "string", "description": "Order ID"},
-                "reason": {"type": "string", "description": "Reason for refund"},
+                "reason": {
+                    "type": "string",
+                    "description": "Reason for refund",
+                },
             },
             "required": ["order_id", "reason"],
         },
@@ -246,7 +253,10 @@ class RetailServiceEnvironment(BaseEnvironment):
             "type": "object",
             "properties": {
                 "order_id": {"type": "string", "description": "Order ID"},
-                "reason": {"type": "string", "description": "Cancellation reason"},
+                "reason": {
+                    "type": "string",
+                    "description": "Cancellation reason",
+                },
             },
             "required": ["order_id", "reason"],
         },
@@ -265,7 +275,12 @@ class RetailServiceEnvironment(BaseEnvironment):
         description="Submit the final result to complete the task. Call this after gathering all required information.",
         parameters={
             "type": "object",
-            "properties": {"result": {"type": "object", "description": "The final result as a structured object"}},
+            "properties": {
+                "result": {
+                    "type": "object",
+                    "description": "The final result as a structured object",
+                }
+            },
             "required": ["result"],
         },
     )

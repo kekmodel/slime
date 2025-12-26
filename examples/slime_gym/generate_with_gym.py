@@ -376,7 +376,9 @@ async def generate_with_episode(args, sample: Sample, sampling_params) -> Sample
     # Create model_fn wrapper for run_episode()
     accumulated_tokens = prompt_token_ids.copy()
 
-    async def model_fn(prev_response: str) -> tuple[str, list[int], list[float]]:
+    async def model_fn(
+        prev_response: str,
+    ) -> tuple[str, list[int], list[float]]:
         """Model function compatible with run_episode() interface."""
         nonlocal accumulated_tokens
 

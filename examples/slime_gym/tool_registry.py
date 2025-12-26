@@ -294,7 +294,10 @@ class DynamicToolMixin:
             # Check enabled status
             if hasattr(self, "_enabled_tools") and self._enabled_tools is not None:
                 if name not in self._enabled_tools:
-                    return ToolResult(output=f"Error: Tool '{name}' is not available for this task.", success=False)
+                    return ToolResult(
+                        output=f"Error: Tool '{name}' is not available for this task.",
+                        success=False,
+                    )
 
             try:
                 tool_def = self._dynamic_tools[name]

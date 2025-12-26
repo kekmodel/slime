@@ -96,11 +96,20 @@ async def test_basic_environment():
         "cancel_order",
     ]
 
-    print_result("Tool registration", all(t in tool_names for t in expected_tools), f"Found: {tool_names}")
+    print_result(
+        "Tool registration",
+        all(t in tool_names for t in expected_tools),
+        f"Found: {tool_names}",
+    )
 
     # Test seed with metadata
     metadata = {
-        "customer": {"id": "CUST-001", "name": "Test User", "email": "test@example.com", "tier": "gold"},
+        "customer": {
+            "id": "CUST-001",
+            "name": "Test User",
+            "email": "test@example.com",
+            "tier": "gold",
+        },
         "order": {
             "id": "ORD-001",
             "product_name": "Test Product",
@@ -120,7 +129,11 @@ async def test_basic_environment():
 
     # Test tool execution
     result = await env.execute_tool("get_customer_info", {"customer_id": "CUST-001"})
-    print_result("Tool execution", result.success and "Test User" in result.output, f"Output: {result.output[:50]}...")
+    print_result(
+        "Tool execution",
+        result.success and "Test User" in result.output,
+        f"Output: {result.output[:50]}...",
+    )
 
     # Test unknown tool
     result = await env.execute_tool("unknown_tool", {})
@@ -141,8 +154,19 @@ async def test_tool_filtering():
 
     # Test 1: enabled_tools filtering
     metadata = {
-        "customer": {"id": "CUST-001", "name": "Test", "email": "t@t.com", "tier": "gold"},
-        "order": {"id": "ORD-001", "product_name": "Test", "price": 10, "status": "delivered", "days_ago": 1},
+        "customer": {
+            "id": "CUST-001",
+            "name": "Test",
+            "email": "t@t.com",
+            "tier": "gold",
+        },
+        "order": {
+            "id": "ORD-001",
+            "product_name": "Test",
+            "price": 10,
+            "status": "delivered",
+            "days_ago": 1,
+        },
         "enabled_tools": ["get_customer_info", "get_order_details"],
     }
     env.seed(metadata)
@@ -166,8 +190,19 @@ async def test_tool_filtering():
     # Test 2: task_type filtering - reset first
     env.reset()
     metadata2 = {
-        "customer": {"id": "CUST-001", "name": "Test", "email": "t@t.com", "tier": "gold"},
-        "order": {"id": "ORD-001", "product_name": "Test", "price": 10, "status": "delivered", "days_ago": 1},
+        "customer": {
+            "id": "CUST-001",
+            "name": "Test",
+            "email": "t@t.com",
+            "tier": "gold",
+        },
+        "order": {
+            "id": "ORD-001",
+            "product_name": "Test",
+            "price": 10,
+            "status": "delivered",
+            "days_ago": 1,
+        },
         "task_type": "read_only",
     }
     env.seed(metadata2)
@@ -183,8 +218,19 @@ async def test_tool_filtering():
     # Test 3: task_type="refund"
     env.reset()
     metadata3 = {
-        "customer": {"id": "CUST-001", "name": "Test", "email": "t@t.com", "tier": "gold"},
-        "order": {"id": "ORD-001", "product_name": "Test", "price": 10, "status": "delivered", "days_ago": 1},
+        "customer": {
+            "id": "CUST-001",
+            "name": "Test",
+            "email": "t@t.com",
+            "tier": "gold",
+        },
+        "order": {
+            "id": "ORD-001",
+            "product_name": "Test",
+            "price": 10,
+            "status": "delivered",
+            "days_ago": 1,
+        },
         "task_type": "refund",
     }
     env.seed(metadata3)
@@ -199,7 +245,11 @@ async def test_tool_filtering():
         "send_notification",
         "submit_result",
     }
-    print_result("task_type='refund' filtering", set(tool_names) == expected, f"Active tools: {tool_names}")
+    print_result(
+        "task_type='refund' filtering",
+        set(tool_names) == expected,
+        f"Active tools: {tool_names}",
+    )
 
 
 async def test_dynamic_tools():
@@ -212,13 +262,20 @@ async def test_dynamic_tools():
     # Check registry has pre-registered tools
     registry = get_registry()
     registered = registry.list_tools()
-    print_result("Tool registry populated", len(registered) > 0, f"Registered tools: {registered}")
+    print_result(
+        "Tool registry populated",
+        len(registered) > 0,
+        f"Registered tools: {registered}",
+    )
 
     env = DynamicServiceEnvironment()
 
     # Test with tool_implementations
     metadata = {
-        "tool_implementations": {"search": "search_advanced", "calculate": "calculate_safe"},
+        "tool_implementations": {
+            "search": "search_advanced",
+            "calculate": "calculate_safe",
+        },
         "expected_actions": ["search", "calculate"],
     }
     env.seed(metadata)
@@ -233,20 +290,35 @@ async def test_dynamic_tools():
 
     # Test executing dynamic tool
     result = await env.execute_tool("search", {"query": "Python tutorials"})
-    print_result("Dynamic tool execution", result.success and "Advanced" in result.output, f"Output: {result.output}")
+    print_result(
+        "Dynamic tool execution",
+        result.success and "Advanced" in result.output,
+        f"Output: {result.output}",
+    )
 
     # Test with tool_providers
     env.reset()
-    metadata2 = {"tool_providers": ["payment_tools"], "expected_actions": ["process_payment"]}
+    metadata2 = {
+        "tool_providers": ["payment_tools"],
+        "expected_actions": ["process_payment"],
+    }
     env.seed(metadata2)
 
     tools = env.get_tools()
     tool_names = [t["function"]["name"] for t in tools]
-    print_result("Tool provider loading", "process_payment" in tool_names, f"Loaded tools: {tool_names}")
+    print_result(
+        "Tool provider loading",
+        "process_payment" in tool_names,
+        f"Loaded tools: {tool_names}",
+    )
 
     # Test executing provider tool
     result = await env.execute_tool("process_payment", {"amount": 99.99, "method": "credit_card"})
-    print_result("Provider tool execution", result.success and "99.99" in result.output, f"Output: {result.output}")
+    print_result(
+        "Provider tool execution",
+        result.success and "99.99" in result.output,
+        f"Output: {result.output}",
+    )
 
     # Test state-based verification for dynamic env
     sample = MockSample(response="")
@@ -270,7 +342,9 @@ async def test_dynamic_tools():
     sample = MockSample(response="")
     reward = await env.verify(sample)
     print_result(
-        "Dynamic env incomplete verification", reward == 0.0, f"Reward: {reward} (expected 0.0, missing complete_task)"
+        "Dynamic env incomplete verification",
+        reward == 0.0,
+        f"Reward: {reward} (expected 0.0, missing complete_task)",
     )
 
 
@@ -283,8 +357,19 @@ async def test_verification():
 
     env = RetailServiceEnvironment()
     metadata = {
-        "customer": {"id": "CUST-001", "name": "Test", "email": "t@t.com", "tier": "gold"},
-        "order": {"id": "ORD-001", "product_name": "Test", "price": 10, "status": "delivered", "days_ago": 1},
+        "customer": {
+            "id": "CUST-001",
+            "name": "Test",
+            "email": "t@t.com",
+            "tier": "gold",
+        },
+        "order": {
+            "id": "ORD-001",
+            "product_name": "Test",
+            "price": 10,
+            "status": "delivered",
+            "days_ago": 1,
+        },
         "expected_actions": ["get_customer_info", "get_order_details"],
     }
     env.seed(metadata)
@@ -337,8 +422,19 @@ async def test_refund_workflow():
 
     env = RetailServiceEnvironment()
     metadata = {
-        "customer": {"id": "CUST-001", "name": "Alice", "email": "alice@example.com", "tier": "gold"},
-        "order": {"id": "ORD-123", "product_name": "Headphones", "price": 99.99, "status": "delivered", "days_ago": 5},
+        "customer": {
+            "id": "CUST-001",
+            "name": "Alice",
+            "email": "alice@example.com",
+            "tier": "gold",
+        },
+        "order": {
+            "id": "ORD-123",
+            "product_name": "Headphones",
+            "price": 99.99,
+            "status": "delivered",
+            "days_ago": 5,
+        },
         "task_type": "refund",
         "expected_actions": [
             "get_customer_info",
@@ -372,11 +468,18 @@ async def test_refund_workflow():
     refund_processed = env.state.refund_processed
 
     # Step 5: Send notification
-    result = await env.execute_tool("send_notification", {"customer_id": "CUST-001", "message": "Refund processed"})
+    result = await env.execute_tool(
+        "send_notification",
+        {"customer_id": "CUST-001", "message": "Refund processed"},
+    )
     steps.append(("send_notification", result.success))
 
     all_success = all(s[1] for s in steps)
-    print_result("Workflow execution", all_success, f"Steps: {[(s[0], '✓' if s[1] else '✗') for s in steps]}")
+    print_result(
+        "Workflow execution",
+        all_success,
+        f"Steps: {[(s[0], '✓' if s[1] else '✗') for s in steps]}",
+    )
 
     print_result(
         "State tracking",
@@ -405,8 +508,19 @@ async def test_order_independent():
 
     env = RetailServiceEnvironment()
     metadata = {
-        "customer": {"id": "CUST-001", "name": "Test", "email": "t@t.com", "tier": "gold"},
-        "order": {"id": "ORD-001", "product_name": "Test", "price": 10, "status": "delivered", "days_ago": 1},
+        "customer": {
+            "id": "CUST-001",
+            "name": "Test",
+            "email": "t@t.com",
+            "tier": "gold",
+        },
+        "order": {
+            "id": "ORD-001",
+            "product_name": "Test",
+            "price": 10,
+            "status": "delivered",
+            "days_ago": 1,
+        },
         "expected_actions": ["check_refund_policy", "process_refund"],
     }
     env.seed(metadata)
@@ -454,12 +568,32 @@ async def test_submit_result():
     env = RetailServiceEnvironment()
 
     # Define expected result
-    expected_result = {"customer_name": "Alice", "order_id": "ORD-001", "refund_amount": 99.99, "status": "refunded"}
+    expected_result = {
+        "customer_name": "Alice",
+        "order_id": "ORD-001",
+        "refund_amount": 99.99,
+        "status": "refunded",
+    }
 
     metadata = {
-        "customer": {"id": "CUST-001", "name": "Alice", "email": "alice@example.com", "tier": "gold"},
-        "order": {"id": "ORD-001", "product_name": "Test", "price": 99.99, "status": "delivered", "days_ago": 1},
-        "expected_actions": ["get_customer_info", "process_refund", "submit_result"],
+        "customer": {
+            "id": "CUST-001",
+            "name": "Alice",
+            "email": "alice@example.com",
+            "tier": "gold",
+        },
+        "order": {
+            "id": "ORD-001",
+            "product_name": "Test",
+            "price": 99.99,
+            "status": "delivered",
+            "days_ago": 1,
+        },
+        "expected_actions": [
+            "get_customer_info",
+            "process_refund",
+            "submit_result",
+        ],
         "expected_result": expected_result,
     }
     env.seed(metadata)
@@ -474,7 +608,9 @@ async def test_submit_result():
     sample = MockSample(response="")
     reward = await env.verify(sample)
     print_result(
-        "Correct result submission", reward == 1.0, f"Reward: {reward}, submitted={env.state.submitted_result}"
+        "Correct result submission",
+        reward == 1.0,
+        f"Reward: {reward}, submitted={env.state.submitted_result}",
     )
 
     # Test with wrong result
@@ -485,12 +621,21 @@ async def test_submit_result():
     await env.execute_tool("process_refund", {"order_id": "ORD-001", "reason": "defective"})
 
     # Submit wrong result
-    wrong_result = {"customer_name": "Bob", "order_id": "ORD-001", "refund_amount": 50.0, "status": "refunded"}
+    wrong_result = {
+        "customer_name": "Bob",
+        "order_id": "ORD-001",
+        "refund_amount": 50.0,
+        "status": "refunded",
+    }
     await env.execute_tool("submit_result", {"result": wrong_result})
 
     sample = MockSample(response="")
     reward = await env.verify(sample)
-    print_result("Wrong result submission", reward == 0.0, f"Reward: {reward} (expected 0.0, submitted != expected)")
+    print_result(
+        "Wrong result submission",
+        reward == 0.0,
+        f"Reward: {reward} (expected 0.0, submitted != expected)",
+    )
 
     # Test without submit_result call
     env.reset()
@@ -502,7 +647,11 @@ async def test_submit_result():
 
     sample = MockSample(response="")
     reward = await env.verify(sample)
-    print_result("Missing submit_result", reward == 0.0, f"Reward: {reward} (expected 0.0, submit_result not called)")
+    print_result(
+        "Missing submit_result",
+        reward == 0.0,
+        f"Reward: {reward} (expected 0.0, submit_result not called)",
+    )
 
 
 async def main():

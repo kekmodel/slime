@@ -75,7 +75,11 @@ class EpisodeResult:
         )
 
 
-def tool(description: str, parameters: dict[str, Any] | None = None, name: str | None = None) -> Callable:
+def tool(
+    description: str,
+    parameters: dict[str, Any] | None = None,
+    name: str | None = None,
+) -> Callable:
     """
     Decorator to register a method as a tool.
 
@@ -189,7 +193,8 @@ class BaseEnvironment(ABC):
         # Check if tool exists
         if name not in self._tools:
             return ToolResult(
-                output=f"Error: Unknown tool '{name}'. Available: {self.get_enabled_tool_names()}", success=False
+                output=f"Error: Unknown tool '{name}'. Available: {self.get_enabled_tool_names()}",
+                success=False,
             )
 
         # Check if tool is enabled
