@@ -3,6 +3,7 @@ Configuration for slime_gym.
 """
 
 import os
+from typing import Any
 
 # Configuration constants (can be overridden via environment variables)
 MAX_TURNS = int(os.environ.get("SLIME_GYM_MAX_TURNS", 10))
@@ -10,7 +11,7 @@ MAX_TURNS_BUFFER = int(os.environ.get("SLIME_GYM_MAX_TURNS_BUFFER", 0))
 DYNAMIC_MAX_TURNS = os.environ.get("SLIME_GYM_DYNAMIC_MAX_TURNS", "true").lower() == "true"
 
 
-def resolve_max_turns(metadata: dict | None) -> int:
+def resolve_max_turns(metadata: dict[str, Any] | None) -> int:
     """
     Resolve max_turns for a sample.
 

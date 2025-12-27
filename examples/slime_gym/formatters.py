@@ -3,6 +3,7 @@ Prompt formatter for ChatML-style models.
 """
 
 import re
+from typing import Any
 
 from jinja2 import Template
 
@@ -59,8 +60,8 @@ After receiving tool results, continue assisting the customer.
 
     def format(
         self,
-        messages: list[dict],
-        tools: list[dict],
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
         system_prompt: str | None = None,
     ) -> str:
         """Format messages and tools into a prompt string."""

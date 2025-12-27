@@ -10,7 +10,6 @@ from typing import Any
 
 from slime.utils.types import Sample
 
-
 # ==================== Sample Helpers ====================
 
 
@@ -48,8 +47,10 @@ def append_to_sample(
     sample.tokens.extend(token_ids)
     sample.response += text
     sample.response_length += len(token_ids)
-    sample.loss_mask.extend([1 if trainable else 0] * len(token_ids))
-    sample.rollout_log_probs.extend(log_probs)
+    if sample.loss_mask is not None:
+        sample.loss_mask.extend([1 if trainable else 0] * len(token_ids))
+    if sample.rollout_log_probs is not None:
+        sample.rollout_log_probs.extend(log_probs)
 
 
 # ==================== Data Classes ====================
@@ -82,7 +83,7 @@ class ToolDefinition:
     version: str = "1.0"
     tags: list[str] = field(default_factory=list)
 
-    def to_schema(self) -> dict:
+    def to_schema(self) -> dict[str, Any]:
         """Convert to OpenAI-compatible tool schema."""
         return {
             "type": "function",

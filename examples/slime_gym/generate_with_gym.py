@@ -9,7 +9,7 @@ Usage:
 """
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from slime.rollout.sglang_rollout import GenerateState
 from slime.utils.http_utils import post
@@ -20,6 +20,9 @@ from .config import resolve_max_turns
 from .env_registry import EnvironmentRegistry, resolve_env_name
 from .formatters import ChatMLFormatter, get_formatter
 from .types import append_to_sample, init_sample_for_generation
+
+# Type alias for post() response
+PostResponse = dict[str, Any]
 
 
 @dataclass
@@ -58,9 +61,7 @@ def setup_generate(args, sample: Sample) -> GenerateContext:
     tools = env.get_tools()
     formatter = get_formatter(getattr(args, "model_type", "chatml"))
 
-    initial_messages = (
-        sample.prompt if isinstance(sample.prompt, list) else [{"role": "user", "content": sample.prompt}]
-    )
+    initial_messages = sample.prompt if isinstance(sample.prompt, list) else [{"role": "user", "content": sample.prompt}]
     prompt_text = formatter.format(initial_messages, tools)
     prompt_token_ids = state.tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
 
@@ -107,7 +108,7 @@ async def generate(args, sample: Sample, sampling_params) -> Sample:
             "return_logprob": True,
         }
 
-        output = await post(ctx.url, payload)
+        output: PostResponse = cast(PostResponse, await post(ctx.url, payload))
 
         # Handle abort
         if output["meta_info"]["finish_reason"]["type"] == "abort":
@@ -167,25 +168,20 @@ async def generate(args, sample: Sample, sampling_params) -> Sample:
     }
 
     # Final alignment verification
-    assert sample.response_length == len(
-        sample.loss_mask
-    ), f"response_length mismatch: {sample.response_length} vs {len(sample.loss_mask)}"
-    assert sample.response_length == len(
-        sample.rollout_log_probs
-    ), f"response_length mismatch: {sample.response_length} vs {len(sample.rollout_log_probs)}"
+    if sample.loss_mask is not None:
+        assert sample.response_length == len(sample.loss_mask), f"response_length mismatch: {sample.response_length} vs {len(sample.loss_mask)}"
+    if sample.rollout_log_probs is not None:
+        assert sample.response_length == len(sample.rollout_log_probs), f"response_length mismatch: {sample.response_length} vs {len(sample.rollout_log_probs)}"
 
     return sample
 
 
-async def reward_func(args, sample: Sample, **kwargs) -> dict:
+async def reward_func(args: Any, sample: Sample, **kwargs: Any) -> dict[str, Any]:
     """
     Reward function: returns pre-calculated reward from generate().
 
     Reward is calculated in generate() while the environment state is valid.
     """
     if sample.reward is None:
-        raise RuntimeError(
-            "Reward not pre-calculated in generate(). "
-            "Ensure generate() completed successfully before calling reward_func()."
-        )
-    return sample.reward
+        raise RuntimeError("Reward not pre-calculated in generate(). Ensure generate() completed successfully before calling reward_func().")
+    return cast(dict[str, Any], sample.reward)

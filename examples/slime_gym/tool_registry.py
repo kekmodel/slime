@@ -13,9 +13,22 @@ import importlib
 import logging
 import operator
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from .types import ToolDefinition, ToolResult
+
+if TYPE_CHECKING:
+    from .types import ExecutionState
+
+
+class _HasBaseEnvironmentAttrs(Protocol):
+    """Protocol for BaseEnvironment attributes accessed by DynamicToolMixin."""
+
+    _enabled_tools: set[str] | None
+    state: "ExecutionState"
+
+    def get_tools(self) -> list[dict[str, Any]]: ...
+    async def execute_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult: ...
 
 logger = logging.getLogger(__name__)
 
@@ -129,16 +142,19 @@ def set_registry(registry: ToolRegistry) -> None:
     _global_registry = registry
 
 
+ToolImplFunc = Callable[..., Awaitable[str]]
+
+
 def register_tool(
     name: str,
     description: str = "",
     parameters: dict[str, Any] | None = None,
     version: str = "1.0",
     tags: list[str] | None = None,
-) -> Callable:
+) -> Callable[[ToolImplFunc], ToolImplFunc]:
     """Decorator to register a function in the global registry."""
 
-    def decorator(func: Callable[..., Awaitable[str]]) -> Callable:
+    def decorator(func: ToolImplFunc) -> ToolImplFunc:
         get_registry().register(
             name=name,
             implementation=func,
@@ -158,18 +174,22 @@ class DynamicToolMixin:
 
     Usage:
         class MyEnvironment(DynamicToolMixin, BaseEnvironment):
-            def setup(self, metadata: dict) -> None:
+            def setup(self, metadata: dict[str, Any]) -> None:
                 super().setup(metadata)
                 self.load_dynamic_tools(metadata)
     """
 
-    def __init__(self, registry: ToolRegistry | None = None):
+    # These will be provided by BaseEnvironment when used as a mixin
+    _enabled_tools: set[str] | None = None
+    state: Any = None  # ExecutionState from BaseEnvironment
+
+    def __init__(self, registry: ToolRegistry | None = None) -> None:
         super().__init__()
         self._registry = registry or get_registry()
         self._dynamic_tools: dict[str, ToolDefinition] = {}
-        self._dynamic_tool_schemas: dict[str, dict] = {}
+        self._dynamic_tool_schemas: dict[str, dict[str, Any]] = {}
 
-    def load_dynamic_tools(self, metadata: dict) -> None:
+    def load_dynamic_tools(self, metadata: dict[str, Any]) -> None:
         """Load tools from metadata."""
         self._dynamic_tools.clear()
         self._dynamic_tool_schemas.clear()
@@ -212,13 +232,13 @@ class DynamicToolMixin:
                     self._dynamic_tools[name] = tool_def
                     self._dynamic_tool_schemas[name] = tool_def.to_schema()
 
-    def get_tools(self) -> list[dict]:
+    def get_tools(self) -> list[dict[str, Any]]:
         """Return combined static and dynamic tool schemas."""
-        static_tools = super().get_tools()
+        static_tools: list[dict[str, Any]] = super().get_tools()  # pyright: ignore[reportAttributeAccessIssue]
         dynamic_tools = list(self._dynamic_tool_schemas.values())
 
         all_tools = static_tools + dynamic_tools
-        if hasattr(self, "_enabled_tools") and self._enabled_tools is not None:
+        if self._enabled_tools is not None:
             all_tools = [t for t in all_tools if t["function"]["name"] in self._enabled_tools]
 
         return all_tools
@@ -226,7 +246,7 @@ class DynamicToolMixin:
     async def execute_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         """Execute tool - checks dynamic tools first, then static."""
         if name in self._dynamic_tools:
-            if hasattr(self, "_enabled_tools") and self._enabled_tools is not None:
+            if self._enabled_tools is not None:
                 if name not in self._enabled_tools:
                     return ToolResult(output=f"Error: Tool '{name}' is not available.", success=False)
 
@@ -234,13 +254,14 @@ class DynamicToolMixin:
                 tool_def = self._dynamic_tools[name]
                 result = await tool_def.implementation(**arguments)
                 # Track execution in state
-                if hasattr(self, "state"):
+                if hasattr(self, "state") and self.state is not None:
                     self.state.record_execution(name, result)
                 return ToolResult(output=str(result), success=True)
             except Exception as e:
                 return ToolResult(output=f"Error: {e}", success=False)
 
-        return await super().execute_tool(name, arguments)
+        # Call BaseEnvironment's execute_tool
+        return await super().execute_tool(name, arguments)  # pyright: ignore[reportAttributeAccessIssue]
 
 
 # ==================== Safe Math Evaluator ====================
@@ -254,12 +275,17 @@ class SafeMathEvaluator:
     Only allows numbers and basic arithmetic operations.
     """
 
-    OPERATORS = {
+    # Binary operators
+    BINARY_OPERATORS: dict[type[ast.operator], Callable[[float, float], float]] = {
         ast.Add: operator.add,
         ast.Sub: operator.sub,
         ast.Mult: operator.mul,
         ast.Div: operator.truediv,
         ast.Pow: operator.pow,
+    }
+
+    # Unary operators
+    UNARY_OPERATORS: dict[type[ast.unaryop], Callable[[float], float]] = {
         ast.USub: operator.neg,
         ast.UAdd: operator.pos,
     }
@@ -281,17 +307,19 @@ class SafeMathEvaluator:
             raise ValueError(f"Unsupported constant type: {type(node.value)}")
 
         if isinstance(node, ast.BinOp):
-            if type(node.op) not in cls.OPERATORS:
-                raise ValueError(f"Unsupported operator: {type(node.op).__name__}")
+            op_type = type(node.op)
+            if op_type not in cls.BINARY_OPERATORS:
+                raise ValueError(f"Unsupported operator: {op_type.__name__}")
             left = cls._eval_node(node.left)
             right = cls._eval_node(node.right)
-            return cls.OPERATORS[type(node.op)](left, right)
+            return cls.BINARY_OPERATORS[op_type](left, right)
 
         if isinstance(node, ast.UnaryOp):
-            if type(node.op) not in cls.OPERATORS:
-                raise ValueError(f"Unsupported operator: {type(node.op).__name__}")
+            op_type = type(node.op)
+            if op_type not in cls.UNARY_OPERATORS:
+                raise ValueError(f"Unsupported operator: {op_type.__name__}")
             operand = cls._eval_node(node.operand)
-            return cls.OPERATORS[type(node.op)](operand)
+            return cls.UNARY_OPERATORS[op_type](operand)
 
         raise ValueError(f"Unsupported expression type: {type(node).__name__}")
 
@@ -305,7 +333,7 @@ def _register_default_tools(registry: ToolRegistry) -> None:
     async def search_basic(query: str) -> str:
         return f"Basic search results for: {query}"
 
-    async def search_advanced(query: str, filters: dict | None = None) -> str:
+    async def search_advanced(query: str, filters: dict[str, Any] | None = None) -> str:
         filter_str = f" with filters {filters}" if filters else ""
         return f"Advanced search results for: {query}{filter_str}"
 

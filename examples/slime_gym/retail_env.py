@@ -12,6 +12,7 @@ Required tool chain:
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Any
 
 from .base import BaseEnvironment, tool
 from .env_registry import EnvironmentRegistry
@@ -52,15 +53,15 @@ class RetailServiceEnvironment(BaseEnvironment):
     Agent must chain multiple tools in correct order.
     """
 
-    state: RetailState
-    expected_result: dict | None
+    state: RetailState  # pyright: ignore[reportIncompatibleVariableOverride]
+    expected_result: dict[str, Any] | None
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.state = RetailState()
         self.expected_result = None
 
-    def setup(self, metadata: dict) -> None:
+    def setup(self, metadata: dict[str, Any]) -> None:
         """Initialize with task-specific data."""
         # Reset base state and expected_actions
         self.state = RetailState()
@@ -102,10 +103,10 @@ class RetailServiceEnvironment(BaseEnvironment):
 
     def reset(self) -> None:
         super().reset()
-        self.state = RetailState()
+        self.state = RetailState()  # pyright: ignore[reportIncompatibleVariableOverride]
         self.expected_result = None
 
-    def _load_mock_data(self, metadata: dict) -> None:
+    def _load_mock_data(self, metadata: dict[str, Any]) -> None:
         """Load mock database from metadata."""
         customer_data = metadata.get("customer", {})
         customer = Customer(
@@ -180,6 +181,8 @@ class RetailServiceEnvironment(BaseEnvironment):
             return f"Refund not eligible: {days_since} days since delivery (max 30 days)"
 
         customer = self.state.customers.get(order.customer_id)
+        if customer is None:
+            return f"Error: Customer {order.customer_id} not found"
         method = "original payment" if customer.membership_tier in ["gold", "platinum"] else "store credit"
         return f"Refund eligible: ${order.total_amount:.2f} via {method}"
 
@@ -249,7 +252,7 @@ class RetailServiceEnvironment(BaseEnvironment):
             "required": ["result"],
         },
     )
-    async def submit_result(self, result: dict) -> str:
+    async def submit_result(self, result: dict[str, Any]) -> str:
         self.state.submitted_result = result
         return "Result submitted successfully"
 

@@ -33,14 +33,14 @@ from .types import ExecutionState, ToolCall, ToolDefinition, ToolResult, append_
 
 
 # Generate helpers (optional - requires SLIME dependencies)
+_has_generate: bool = False
 try:
     from .generate_with_gym import GenerateContext, setup_generate
 
-    _HAS_GENERATE = True
+    _has_generate = True
 except ImportError:
-    GenerateContext = None  # type: ignore
-    setup_generate = None  # type: ignore
-    _HAS_GENERATE = False
+    GenerateContext = None  # type: ignore[assignment,misc]
+    setup_generate = None  # type: ignore[assignment,misc]
 
 __all__ = [
     # Types

@@ -28,6 +28,8 @@ Note: Verification is state-based (tool execution tracking).
       Use expected_result for exact match verification of final answers.
 """
 
+from typing import Any
+
 # ==================== Refund Tasks with Result Verification ====================
 
 REFUND_TASK_WITH_RESULT = {
@@ -245,7 +247,7 @@ EXPLICIT_TOOLS_TASK = {
 # ==================== Sample Prompts ====================
 
 
-def get_prompt_for_task(task: dict) -> list[dict]:
+def get_prompt_for_task(task: dict[str, Any]) -> list[dict[str, str]]:
     """Generate a user prompt for the given task."""
     customer = task["customer"]
     order = task["order"]
@@ -253,27 +255,13 @@ def get_prompt_for_task(task: dict) -> list[dict]:
     task_id = task["task_id"]
 
     if "refund" in task_id or task_type == "refund":
-        content = (
-            f"Hi, I'm {customer['name']} (customer ID: {customer['id']}). "
-            f"I'd like to request a refund for my order {order['id']}. "
-            f"The {order['product_name']} I received isn't working properly."
-        )
+        content = f"Hi, I'm {customer['name']} (customer ID: {customer['id']}). I'd like to request a refund for my order {order['id']}. The {order['product_name']} I received isn't working properly."
     elif "cancel" in task_id or task_type == "cancel":
-        content = (
-            f"Hi, I'm {customer['name']} (customer ID: {customer['id']}). "
-            f"I need to cancel my order {order['id']} for the {order['product_name']}. "
-            f"I changed my mind about the purchase."
-        )
+        content = f"Hi, I'm {customer['name']} (customer ID: {customer['id']}). I need to cancel my order {order['id']} for the {order['product_name']}. I changed my mind about the purchase."
     elif "info" in task_id or task_type == "read_only":
-        content = (
-            f"Hi, I'm {customer['name']} (customer ID: {customer['id']}). "
-            f"Can you tell me the status of my order {order['id']}?"
-        )
+        content = f"Hi, I'm {customer['name']} (customer ID: {customer['id']}). Can you tell me the status of my order {order['id']}?"
     else:
-        content = (
-            f"Hi, I'm {customer['name']} (customer ID: {customer['id']}). "
-            f"I have a question about my order {order['id']}."
-        )
+        content = f"Hi, I'm {customer['name']} (customer ID: {customer['id']}). I have a question about my order {order['id']}."
 
     return [{"role": "user", "content": content}]
 
@@ -297,7 +285,7 @@ ALL_TASKS = [
 ]
 
 
-def generate_training_samples() -> list[dict]:
+def generate_training_samples() -> list[dict[str, Any]]:
     """
     Generate training samples in SLIME format.
 

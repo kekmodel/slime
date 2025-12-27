@@ -8,12 +8,12 @@ Demonstrates:
 """
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from .base import BaseEnvironment, tool
 from .env_registry import EnvironmentRegistry
 from .tool_registry import DynamicToolMixin, ToolDefinition, ToolRegistry, get_registry
 from .types import ExecutionState, ToolResult
-
 
 # ==================== Tool Providers ====================
 
@@ -108,12 +108,12 @@ _register_providers()
 class DynamicState(ExecutionState):
     """State with context storage."""
 
-    context: dict = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
     task_completed: bool = False
 
 
 @EnvironmentRegistry.register("dynamic_service")
-class DynamicServiceEnvironment(DynamicToolMixin, BaseEnvironment):
+class DynamicServiceEnvironment(DynamicToolMixin, BaseEnvironment):  # pyright: ignore[reportUnsafeMultipleInheritance]
     """
     Environment with dynamic tool loading from metadata.
 
@@ -126,13 +126,13 @@ class DynamicServiceEnvironment(DynamicToolMixin, BaseEnvironment):
         }
     """
 
-    state: DynamicState
+    state: DynamicState  # pyright: ignore[reportIncompatibleVariableOverride]
 
-    def __init__(self, registry: ToolRegistry | None = None):
+    def __init__(self, registry: ToolRegistry | None = None) -> None:
         super().__init__(registry=registry)
         self.state = DynamicState()
 
-    def setup(self, metadata: dict) -> None:
+    def setup(self, metadata: dict[str, Any]) -> None:
         """Initialize with static filtering and dynamic tool loading."""
         # Reset state
         self.state = DynamicState(context=metadata.get("context", {}))
@@ -150,11 +150,11 @@ class DynamicServiceEnvironment(DynamicToolMixin, BaseEnvironment):
 
     def reset(self) -> None:
         super().reset()
-        self.state = DynamicState()
+        self.state = DynamicState()  # pyright: ignore[reportIncompatibleVariableOverride]
         self._dynamic_tools.clear()
         self._dynamic_tool_schemas.clear()
 
-    async def execute_tool(self, name: str, arguments: dict) -> ToolResult:
+    async def execute_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         """Execute tool with state tracking."""
         result = await super().execute_tool(name, arguments)
         # State tracking is handled in parent classes

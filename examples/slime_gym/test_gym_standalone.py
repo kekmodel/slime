@@ -34,14 +34,14 @@ class MockStatus(Enum):
 class MockSample:
     """Mock of slime.utils.types.Sample"""
 
-    prompt: str | list = ""
+    prompt: str | list[dict[str, str]] = ""
     response: str = ""
-    tokens: list = field(default_factory=list)
+    tokens: list[int] = field(default_factory=list)
     response_length: int = 0
-    loss_mask: list = field(default_factory=list)
-    rollout_log_probs: list = field(default_factory=list)
+    loss_mask: list[int] = field(default_factory=list)
+    rollout_log_probs: list[float] = field(default_factory=list)
     reward: Any = None
-    metadata: dict = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     status: MockStatus = MockStatus.PENDING
 
     class Status:
@@ -62,9 +62,9 @@ sys.modules["slime.utils.types"].Sample = MockSample
 
 
 def print_header(title: str):
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  {title}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
 
 def print_result(test_name: str, passed: bool, details: str = ""):
@@ -339,13 +339,9 @@ async def test_refund_workflow():
 
     # Execute workflow
     steps = []
-    steps.append(
-        ("get_customer_info", (await env.execute_tool("get_customer_info", {"customer_id": "CUST-001"})).success)
-    )
+    steps.append(("get_customer_info", (await env.execute_tool("get_customer_info", {"customer_id": "CUST-001"})).success))
     steps.append(("get_order_details", (await env.execute_tool("get_order_details", {"order_id": "ORD-123"})).success))
-    steps.append(
-        ("check_refund_policy", (await env.execute_tool("check_refund_policy", {"order_id": "ORD-123"})).success)
-    )
+    steps.append(("check_refund_policy", (await env.execute_tool("check_refund_policy", {"order_id": "ORD-123"})).success))
     steps.append(
         (
             "process_refund",
@@ -355,9 +351,7 @@ async def test_refund_workflow():
     steps.append(
         (
             "send_notification",
-            (
-                await env.execute_tool("send_notification", {"customer_id": "CUST-001", "message": "Refund processed"})
-            ).success,
+            (await env.execute_tool("send_notification", {"customer_id": "CUST-001", "message": "Refund processed"})).success,
         )
     )
 

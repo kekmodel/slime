@@ -9,18 +9,24 @@ Provides:
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from functools import wraps
-from typing import Any
+from typing import Any, ParamSpec, TypeVar, cast
 
 from .types import ExecutionState, ToolCall, ToolResult
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+# Type for tool functions with _tool_schema attribute
+ToolFunc = Callable[..., Awaitable[str]]
 
 
 def tool(
     description: str,
     parameters: dict[str, Any] | None = None,
     name: str | None = None,
-) -> Callable:
+) -> Callable[[ToolFunc], ToolFunc]:
     """
     Decorator to register a method as a tool.
 
@@ -37,8 +43,8 @@ def tool(
             ...
     """
 
-    def decorator(func: Callable) -> Callable:
-        func._tool_schema = {
+    def decorator(func: ToolFunc) -> ToolFunc:
+        tool_schema = {
             "type": "function",
             "function": {
                 "name": name or func.__name__,
@@ -48,11 +54,12 @@ def tool(
         }
 
         @wraps(func)
-        async def wrapper(*args, **kwargs):
+        async def wrapper(*args: Any, **kwargs: Any) -> str:
             return await func(*args, **kwargs)
 
-        wrapper._tool_schema = func._tool_schema
-        return wrapper
+        # Use object.__setattr__ to bypass type checking for dynamic attribute
+        object.__setattr__(wrapper, "_tool_schema", tool_schema)
+        return cast(ToolFunc, wrapper)
 
     return decorator
 
@@ -89,9 +96,9 @@ class BaseEnvironment:
     4. Optionally extend state with domain-specific fields
     """
 
-    def __init__(self):
-        self._tools: dict[str, Callable] = {}
-        self._tool_schemas: dict[str, dict] = {}
+    def __init__(self) -> None:
+        self._tools: dict[str, ToolFunc] = {}
+        self._tool_schemas: dict[str, dict[str, Any]] = {}
         self._enabled_tools: set[str] | None = None
         self.state: ExecutionState = ExecutionState()
         self.expected_actions: set[str] = set()
@@ -108,7 +115,7 @@ class BaseEnvironment:
                 self._tools[tool_name] = method
                 self._tool_schemas[tool_name] = method._tool_schema
 
-    def get_tools(self) -> list[dict]:
+    def get_tools(self) -> list[dict[str, Any]]:
         """Return tool schemas in OpenAI format."""
         if self._enabled_tools is None:
             return list(self._tool_schemas.values())
@@ -148,7 +155,7 @@ class BaseEnvironment:
         except Exception as e:
             return ToolResult(output=f"Error: {e}", success=False)
 
-    def setup(self, metadata: dict) -> None:
+    def setup(self, metadata: dict[str, Any]) -> None:
         """
         Initialize environment for a specific sample.
 

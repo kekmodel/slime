@@ -47,11 +47,7 @@ class EnvironmentRegistry:
         """
         if name not in cls._envs:
             available = list(cls._envs.keys())
-            raise ValueError(
-                f"Unknown environment: '{name}'. "
-                f"Available environments: {available}. "
-                f"Register new environments with @EnvironmentRegistry.register()"
-            )
+            raise ValueError(f"Unknown environment: '{name}'. Available environments: {available}. Register new environments with @EnvironmentRegistry.register()")
         return cls._envs[name]()
 
     @classmethod
