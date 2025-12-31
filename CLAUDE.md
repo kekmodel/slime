@@ -298,6 +298,21 @@ async def generate(args, sample: Sample, sampling_params) -> Sample:
 - `--save-debug-rollout-data path_{rollout_id}.pt`: Save rollout data
 - `--load-debug-rollout-data path_{rollout_id}.pt`: Load rollout data for training debugging
 
+See [Debugging Guide](docs/en/developer_guide/debug.md) for detailed debugging tips.
+
+## Synchronization Model
+
+The training loop is **synchronous** - each phase completes before the next starts:
+
+```
+Rollout (generate) → Train (update) → Weight Sync → Next Rollout
+       ↓                  ↓                ↓
+   Wait for all      Wait for all     Wait for all
+   responses         gradients        engines to load
+```
+
+This is required for on-policy RL correctness (rollout policy = training policy).
+
 ## Supported Models
 
 - **Qwen**: Qwen3 series (including MoE variants), Qwen2.5 series
@@ -307,3 +322,10 @@ async def generate(args, sample: Sample, sampling_params) -> Sample:
 - **Other**: Moonlight, MIMO, Kimi-K2
 
 Model configs are in `scripts/models/`. Source the appropriate script before training.
+
+## Documentation Links
+
+- [Quick Start Guide](docs/en/get_started/quick_start.md)
+- [Usage Documentation](docs/en/get_started/usage.md)
+- [Debugging Guide](docs/en/developer_guide/debug.md)
+- [Q&A](docs/en/get_started/qa.md)
