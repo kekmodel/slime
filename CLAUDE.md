@@ -4,16 +4,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-slime is an LLM post-training framework for reinforcement learning (RL) scaling. It connects Megatron-LM (training) with SGLang (inference) to enable high-performance RL training with flexible data generation workflows. The framework powers models like GLM-4.7, GLM-4.6, and GLM-4.5.
+slime is an LLM post-training framework for reinforcement learning (RL) scaling. It connects Megatron-LM (training) with SGLang (inference) via Ray to enable high-performance RL training. The framework powers models like GLM-4.7, GLM-4.6, and GLM-4.5.
 
 ## Architecture
 
-The system has three main components:
-- **Training (Megatron/FSDP)**: Main training process using Megatron-LM or FSDP backend, reads data from Data Buffer, syncs parameters to rollout
-- **Rollout (SGLang + router)**: Generates new data including rewards/verifier outputs, stores in Data Buffer
-- **Data Buffer**: Bridge module managing prompt initialization, custom data, and rollout generation
+Three main components orchestrated by Ray:
+- **Training (Megatron/FSDP)**: Reads rollout data, computes log_probs/advantages, updates weights
+- **Rollout (SGLang + router)**: Generates responses, computes rewards, returns Sample objects
+- **Weight Sync**: Converts Megatron weights to HuggingFace format and sends to SGLang
 
-Training loop (`train.py`): Rollout generation → Training step → Weight sync → Repeat
+Main loop in `train.py`:
+```
+for rollout_id in range(num_rollout):
+    rollout_data = rollout_manager.generate()   # SGLang generates responses
+    actor_model.async_train(rollout_data)       # Megatron trains on data
+    actor_model.update_weights()                # Sync weights to SGLang
+```
+
+### Key Data Flow
+```
+DataSource → Prompts → SGLang (generate) → Sample objects → Reward Model
+    → Training Data (tokens, log_probs, rewards, loss_mask) → Megatron (train)
+```
 
 ## Common Commands
 
@@ -72,35 +84,61 @@ Arguments are in three categories:
 
 Critical training parameters:
 - `--rollout-batch-size`: Number of prompts per rollout
-- `--n-samples-per-prompt`: Responses generated per prompt
+- `--n-samples-per-prompt`: Responses generated per prompt (for GRPO)
 - `--global-batch-size`: Samples per optimizer step
 - `--num-steps-per-rollout`: Training steps per rollout (default 1 for on-policy)
-- `--colocate`: Share GPUs between training and inference
+- `--colocate`: Share GPUs between training and inference (uses offload)
 - `--train-backend`: `megatron` or `fsdp`
+
+**Important constraint**: `rollout-batch-size × n-samples-per-prompt = global-batch-size × num-steps-per-rollout`
 
 ## Code Structure
 
+### Key Entry Points (read in this order)
+1. `train.py` - Main training loop, orchestrates everything
+2. `slime/ray/rollout.py` - RolloutManager, manages SGLang engines
+3. `slime/rollout/sglang_rollout.py` - Actual generation logic (generate_rollout)
+4. `slime/backends/megatron_utils/actor.py` - MegatronTrainRayActor (training)
+5. `slime/utils/ppo_utils.py` - PPO/GRPO algorithm implementation
+
+### Directory Overview
 ```
 slime/
-├── backends/           # Training backends
-│   ├── megatron_utils/ # Megatron integration, weight conversion
-│   ├── fsdp_utils/     # FSDP backend
-│   └── sglang_utils/   # SGLang engine management
-├── ray/                # Ray actors and placement groups
-├── rollout/            # Rollout generation, reward models, data sources
-│   ├── rm_hub/         # Built-in reward models (deepscaler, math_utils, etc.)
-│   └── filter_hub/     # Dynamic sampling filters
-├── router/             # Request routing with middleware
-└── utils/              # Arguments, logging, distributed utilities
+├── backends/
+│   ├── megatron_utils/
+│   │   ├── actor.py           # MegatronTrainRayActor
+│   │   ├── loss.py            # Log-prob and advantage computation
+│   │   └── update_weight/     # Weight sync (Megatron→HF→SGLang)
+│   ├── fsdp_utils/            # Alternative FSDP backend
+│   └── sglang_utils/          # SGLang engine wrapper
+├── ray/
+│   ├── rollout.py             # RolloutManager (core!)
+│   ├── placement_group.py     # GPU allocation
+│   └── train_actor.py         # Base TrainRayActor class
+├── rollout/
+│   ├── sglang_rollout.py      # generate_rollout function
+│   ├── rm_hub/                # Built-in reward models
+│   └── filter_hub/            # Dynamic sampling filters (DAPO)
+└── utils/
+    ├── arguments.py           # All argument definitions
+    ├── ppo_utils.py           # PPO/GRPO core algorithms
+    └── types.py               # Sample class definition
 
-slime_plugins/          # Model-specific plugins
-├── mbridge/            # Megatron bridge implementations
-├── models/             # Custom model implementations
-└── rollout_buffer/     # External rollout buffer integration
+scripts/models/                # Model configs (source before training)
+```
 
-scripts/
-├── models/             # Model configuration shells (source these before training)
-└── run-*.sh            # Example training scripts
+### Core Data Structure: Sample
+```python
+Sample = {
+    "prompt": str,              # Input prompt
+    "response": str,            # Generated response
+    "tokens": list[int],        # Token IDs (prompt + response)
+    "response_length": int,     # Response token count
+    "reward": float,            # Reward score
+    "loss_mask": list[int],     # 1=train on this token, 0=skip
+    "rollout_log_probs": list,  # Log probs from rollout (for importance sampling)
+    "status": COMPLETED|TRUNCATED|ABORTED,
+}
 ```
 
 ## Extending slime
@@ -126,6 +164,19 @@ async def reward_func(args, sample: Sample, **kwargs) -> float:
 async def generate(args, sample: Sample, sampling_params) -> Sample:
     # Handle loss_mask: 1 for model tokens, 0 for tool/env tokens
     pass
+```
+
+## GPU Allocation Modes
+
+**Disaggregated (default)**: Separate GPUs for training and inference
+```bash
+--actor-num-gpus-per-node 4 --rollout-num-gpus 4  # 4 for train, 4 for inference
+```
+
+**Colocated**: Same GPUs, time-shared with offload
+```bash
+--colocate --actor-num-gpus-per-node 8  # All 8 GPUs shared
+# Uses --sglang-mem-fraction-static 0.8 to leave room for Megatron init
 ```
 
 ## Debugging
