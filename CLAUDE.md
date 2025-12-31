@@ -27,6 +27,118 @@ DataSource → Prompts → SGLang (generate) → Sample objects → Reward Model
     → Training Data (tokens, log_probs, rewards, loss_mask) → Megatron (train)
 ```
 
+## Ray Distributed Architecture
+
+slime uses Ray as the distributed orchestration layer. Understanding Ray patterns is essential for working with the codebase.
+
+### Core Ray Actors
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         train.py (Driver)                            │
+│                                                                      │
+│   ┌─────────────────────┐         ┌─────────────────────────────┐   │
+│   │    RayTrainGroup    │         │      RolloutManager         │   │
+│   │                     │         │      (@ray.remote)          │   │
+│   │  ┌───────────────┐  │         │                             │   │
+│   │  │TrainRayActor 0│──┼────────▶│  ┌─────────────────────┐   │   │
+│   │  │  (GPU 0)      │  │         │  │   SGLangEngine 0    │   │   │
+│   │  └───────────────┘  │         │  │   (GPU 4,5)         │   │   │
+│   │  ┌───────────────┐  │         │  └─────────────────────┘   │   │
+│   │  │TrainRayActor 1│  │         │  ┌─────────────────────┐   │   │
+│   │  │  (GPU 1)      │  │         │  │   SGLangEngine 1    │   │   │
+│   │  └───────────────┘  │         │  │   (GPU 6,7)         │   │   │
+│   │       ...           │         │  └─────────────────────┘   │   │
+│   └─────────────────────┘         └─────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Ray Components
+
+| Component | File | Role |
+|-----------|------|------|
+| `RayTrainGroup` | `slime/ray/actor_group.py` | Manages multiple TrainRayActors as a group |
+| `TrainRayActor` | `slime/ray/train_actor.py` | Base class for training actors (1 per GPU) |
+| `MegatronTrainRayActor` | `slime/backends/megatron_utils/actor.py` | Megatron implementation of TrainRayActor |
+| `RolloutManager` | `slime/ray/rollout.py` | Manages SGLang engines, routes requests |
+| `SGLangEngine` | `slime/backends/sglang_utils/sglang_engine.py` | Wraps one SGLang server instance |
+
+### Ray Patterns Used
+
+**1. PlacementGroup for GPU Allocation** (`placement_group.py`):
+```python
+# Ensures actors are placed on specific GPUs
+pg = placement_group([{"GPU": 1, "CPU": 1} for _ in range(num_gpus)])
+actor = Actor.options(
+    scheduling_strategy=PlacementGroupSchedulingStrategy(
+        placement_group=pg,
+        placement_group_bundle_index=gpu_index,
+    )
+).remote()
+```
+
+**2. Async Pattern for Parallel Execution**:
+```python
+# Launch all actors in parallel, wait for all to complete
+handles = [actor.train.remote(data) for actor in actors]
+results = ray.get(handles)
+```
+
+**3. Object Store for Data Transfer** (`ray.put`/`ray.get`):
+```python
+# Put large data in object store once, share reference
+data_ref = ray.put(rollout_data)
+# All actors receive same reference (zero-copy on same node)
+[actor.train.remote(data_ref) for actor in actors]
+```
+
+### Communication Flow
+
+```
+1. Weight Update (Megatron → SGLang):
+   TrainRayActor.update_weights()
+   └─→ Gather weights from TP/PP ranks (NCCL)
+   └─→ Convert to HuggingFace format
+   └─→ Send to SGLangEngine via:
+       - IPC (colocate, same machine)
+       - NCCL broadcast (distributed, different machines)
+
+2. Rollout Data (SGLang → Megatron):
+   RolloutManager.generate()
+   └─→ SGLangEngine generates responses (async HTTP to router)
+   └─→ Compute rewards (batched async)
+   └─→ Convert to training format
+   └─→ Split by data_parallel_rank
+   └─→ ray.put() each partition → return refs to driver
+   └─→ Driver passes refs to TrainRayActors
+```
+
+### Actor Lifecycle
+
+```python
+# 1. Create placement groups (GPU allocation)
+pgs = create_placement_groups(args)
+
+# 2. Create RolloutManager (spawns SGLangEngines internally)
+rollout_manager = RolloutManager.remote(args, pgs["rollout"])
+
+# 3. Create training actors (via RayTrainGroup)
+actor_model = RayTrainGroup(args, pg=pgs["actor"])
+ray.get(actor_model.async_init(args, role="actor"))
+
+# 4. Connect: actors get reference to rollout_manager
+actor_model.set_rollout_manager(rollout_manager)
+
+# 5. Initial weight sync
+actor_model.update_weights()
+
+# 6. Training loop
+for rollout_id in range(num_rollout):
+    data = ray.get(rollout_manager.generate.remote(rollout_id))
+    ray.get(actor_model.async_train(rollout_id, data))
+    actor_model.update_weights()
+```
+
 ## Common Commands
 
 ### Installation
