@@ -1,184 +1,220 @@
 # Nano SLIME
 
-**SLIME(Scalable Language Model Inference Engine)의 최소 구현체**
+**Minimal GRPO Training Implementation with SGLang + FSDP**
 
-학습 목적으로 SLIME의 핵심 기능만 추출하여 구현했습니다.
+A learning-focused implementation of SLIME's core GRPO training loop.
 
-## 지원 기능
+## Features
 
-| 기능 | 파일 | 상태 |
-|------|------|------|
-| GRPO | `slime/utils/ppo_utils.py` | ✅ |
-| KL loss (k1/k2/k3) | `slime/utils/ppo_utils.py` | ✅ |
-| unbiased_kl | `slime/utils/ppo_utils.py` | ✅ |
-| adv wo std | `slime/rollout/reward.py` | ✅ |
-| use rollout logprobs | `slime/backends/training_utils/loss.py` | ✅ |
-| filtering zero std | `slime/rollout/reward.py` | ✅ |
-| custom reward | `slime/rollout/reward.py` | ✅ |
-| Slime Router | `slime/router/router.py` | ✅ |
-| Routing Replay | `slime/utils/routing_replay.py` | ✅ |
-| Ray 분산 | `slime/ray/` | ✅ |
-| colocate 모드 | `slime/ray/placement_group.py` | ✅ |
-| eval | `slime/ray/rollout.py` | ✅ |
-| TensorBoard | `slime/utils/tracking.py` | ✅ |
-| Megatron backend | - | ⏳ (구조만) |
-| FSDP backend | - | ⏳ (구조만) |
+| Feature | File | Description |
+|---------|------|-------------|
+| GRPO | `slime/utils/ppo_utils.py` | Group Relative Policy Optimization |
+| KL loss (k1/k2/k3) | `slime/utils/ppo_utils.py` | Multiple KL divergence formulations |
+| unbiased_kl | `slime/utils/ppo_utils.py` | Off-policy importance sampling correction |
+| adv wo std | `slime/rollout/reward.py` | GRPO without std normalization |
+| use rollout logprobs | `slime/backends/training_utils/loss.py` | Off-policy training |
+| filtering zero std | `slime/rollout/reward.py` | Filter uninformative groups |
+| FSDP Actor | `slime/backends/fsdp/actor.py` | Distributed training with FSDP |
+| SGLang Engine | `slime/backends/sglang/engine.py` | Fast inference with SGLang |
+| Slime Router | `slime/router/router.py` | Load balancing for SGLang engines |
+| Routing Replay | `slime/utils/routing_replay.py` | MoE expert routing consistency |
+| TensorBoard | `slime/utils/tracking.py` | Training metrics logging |
 
-## 디렉토리 구조
+## Quick Start
+
+```bash
+# Install dependencies
+pip install torch transformers
+
+# Mock mode (no GPU needed)
+python train.py --mock --num-rollout 5
+
+# With actual model (requires GPU)
+python train.py --hf-checkpoint meta-llama/Llama-3.2-1B --num-rollout 10
+
+# Multi-GPU with FSDP
+torchrun --nproc_per_node=4 train.py --hf-checkpoint meta-llama/Llama-3.2-1B
+```
+
+## Training Flow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Main Training Loop                        │
+├─────────────────────────────────────────────────────────────┤
+│  1. Load prompts                                             │
+│  2. SGLang.generate(prompts) → samples with log_probs       │
+│  3. RewardModel(samples) → rewards                          │
+│  4. post_process_rewards() → GRPO group normalization       │
+│  5. FSDPActor.train(samples) → gradient update              │
+│  6. FSDPActor.update_weights() → sync to SGLang             │
+│  7. Repeat                                                   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Directory Structure
 
 ```
 nano_slime/
-├── train.py                    # 메인 진입점
+├── train.py                        # Main entry point
 ├── README.md
 │
 ├── slime/
-│   ├── utils/                  # 핵심 유틸리티
-│   │   ├── ppo_utils.py        # KL, GRPO, policy loss
-│   │   ├── types.py            # Sample, RolloutBatch
-│   │   ├── routing_replay.py   # MoE routing 재현
-│   │   └── tracking.py         # TensorBoard/WandB
+│   ├── utils/
+│   │   ├── ppo_utils.py           # KL, GRPO, policy loss
+│   │   ├── types.py               # Sample, RolloutBatch
+│   │   ├── routing_replay.py      # MoE routing replay
+│   │   └── tracking.py            # TensorBoard/WandB
 │   │
 │   ├── backends/
+│   │   ├── fsdp/
+│   │   │   ├── actor.py           # FSDP training actor
+│   │   │   └── parallel.py        # Parallel state
+│   │   ├── sglang/
+│   │   │   └── engine.py          # SGLang inference wrapper
 │   │   └── training_utils/
-│   │       └── loss.py         # Advantage, policy_loss_function
+│   │       └── loss.py            # Advantage, policy loss
 │   │
 │   ├── rollout/
-│   │   └── reward.py           # 보상 정규화, zero std 필터링
+│   │   └── reward.py              # GRPO normalization
 │   │
 │   ├── ray/
-│   │   ├── placement_group.py  # GPU 배치
-│   │   └── rollout.py          # RolloutManager
+│   │   ├── placement_group.py     # GPU placement
+│   │   └── rollout.py             # RolloutManager
 │   │
 │   └── router/
-│       └── router.py           # SlimeRouter
+│       └── router.py              # SlimeRouter
 │
-└── tests/                      # TDD 테스트
+└── tests/
     ├── test_phase1_ppo_utils.py
     ├── test_phase2_loss.py
     └── test_phase3_reward.py
 ```
 
-## 학습 경로
+## Key Concepts
 
-### Phase 1: 핵심 알고리즘 (`ppo_utils.py`)
+### GRPO (Group Relative Policy Optimization)
 
-```python
-# KL divergence 계산
-kl = compute_approx_kl(log_probs, ref_log_probs, kl_loss_type="k3")
-
-# GRPO returns
-returns = get_grpo_returns(rewards, kl)
-
-# Policy loss
-pg_loss, clipfrac = compute_policy_loss(ppo_kl, advantages, eps_clip)
-```
-
-**학습 포인트:**
-- k1/k2/k3 KL 타입의 수학적 차이
-- unbiased_kl: importance ratio로 off-policy 보정
-- GRPO: Return = Reward (단순함의 힘)
-
-### Phase 2: Loss 함수 (`loss.py`)
+GRPO normalizes rewards **within groups** of samples from the same prompt:
 
 ```python
-# Advantage 계산
-compute_advantages_and_returns(args, parallel_state, rollout_data)
+# Generate n samples per prompt
+samples = engine.generate(prompts, n_samples=4)
 
-# Policy loss
-loss, metrics = policy_loss_function(args, parallel_state, batch, logits, reducer)
+# Group-wise normalization
+rewards = rewards.reshape(-1, n_samples_per_prompt)  # [num_prompts, n_samples]
+mean = rewards.mean(dim=-1, keepdim=True)           # Per-prompt baseline
+rewards = rewards - mean                             # Relative quality
+if grpo_std_normalization:
+    std = rewards.std(dim=-1, keepdim=True)
+    rewards = rewards / (std + 1e-6)
 ```
 
-**학습 포인트:**
-- use_rollout_logprobs: 어떤 log_probs를 old로 사용할지
-- use_kl_loss: 별도 KL penalty 추가
-- normalize_advantages: DP 그룹 간 whitening
+Why group-wise?
+- Removes difficulty variation across prompts
+- Learns relative quality within each prompt
+- Return = Reward (simple, effective)
 
-### Phase 3: 보상 처리 (`reward.py`)
+### KL Divergence Types
 
 ```python
-# GRPO 그룹별 정규화
-raw, normalized = post_process_rewards(args, samples)
+# k1: Simple log ratio
+kl = log_probs - ref_log_probs
 
-# Zero STD 필터링
-filtered = filter_zero_std_groups(args, samples)
+# k2: Squared for numerical stability
+kl = (log_probs - ref_log_probs) ** 2 / 2
+
+# k3: Low variance, unbiased (recommended)
+r = ref_log_probs - log_probs
+kl = exp(-r) - 1 - r
 ```
 
-**학습 포인트:**
-- 그룹별 mean 제거 (baseline 역할)
-- grpo_std_normalization=False가 "adv wo std"
-- Zero STD 문제와 해결
-
-### Phase 4: 분산 학습 (`ray/`)
+### Off-policy Training with rollout_log_probs
 
 ```python
-# Placement Group 생성
-pgs = create_placement_groups(args)
+# Problem: log_probs at train time ≠ log_probs at rollout time
+# Solution: Store rollout log_probs and use importance sampling
 
-# RolloutManager
-rollout_data = rollout_manager.generate(rollout_id)
+if use_rollout_logprobs:
+    old_log_probs = rollout_log_probs  # From SGLang generation
+else:
+    old_log_probs = log_probs          # Re-computed at train time
+
+# Importance ratio for unbiased gradients
+ratio = exp(log_probs - old_log_probs)
 ```
 
-**학습 포인트:**
-- colocate vs distributed 모드
-- DP 분할
+## Architecture
 
-### Phase 5: Router (`router/`)
+### Training (FSDP)
 
 ```python
-# Slime Router
-router = SlimeRouter(args)
-url = router._use_url()  # 최소 요청 워커 선택
+# HuggingFace model + FSDP for distributed training
+model = AutoModelForCausalLM.from_pretrained(checkpoint)
+model = FSDP(model, sharding_strategy=FULL_SHARD)
 
-# Routing Replay
-patched_fn, replay = get_routing_replay_compute_topk(original_fn)
+# Training step
+logits = model(tokens)
+loss = policy_loss_function(logits, advantages, old_log_probs)
+loss.backward()
+optimizer.step()
 ```
 
-**학습 포인트:**
-- 최소 활성 요청 기반 로드 밸런싱
-- MoE routing 재현의 필요성
+### Inference (SGLang)
 
-## 실행
+```python
+# SGLang for fast sampling
+engine = SGLangEngine(args)
+samples = engine.generate(prompts, n_samples=4)
+
+# Weight sync after training
+engine.update_weights(actor.state_dict())
+```
+
+### Colocate Mode
+
+When GPU memory is limited, share GPUs between training and inference:
+
+```python
+# Rollout phase: Training model on CPU
+actor.sleep()  # model.cpu()
+samples = engine.generate(prompts)
+
+# Training phase: SGLang releases memory
+engine.release_memory()
+actor.wake_up()  # model.cuda()
+actor.train(samples)
+```
+
+## Command Line Options
 
 ```bash
-# 기본 실행
-python train.py
-
-# 옵션 확인
-python train.py --help
-
-# GRPO 학습 (예시)
 python train.py \
+    --hf-checkpoint meta-llama/Llama-3.2-1B \
     --num-rollout 100 \
+    --rollout-batch-size 8 \
     --n-samples-per-prompt 4 \
     --kl-coef 0.05 \
     --kl-loss-type k3 \
-    --use-tensorboard
+    --use-rollout-logprobs \
+    --use-tensorboard \
+    --lr 1e-6
 ```
 
-## 원본 SLIME과의 차이
-
-| 기능 | 원본 | Nano |
-|------|------|------|
-| VLM (multimodal) | ✅ | ❌ |
-| PPO (critic) | ✅ | ❌ |
-| Context Parallel | ✅ | ❌ |
-| Fault Tolerance | ✅ | ❌ |
-| Megatron backend | ✅ | 구조만 |
-| FSDP backend | ✅ | 구조만 |
-
-## 테스트
+## Testing
 
 ```bash
-# pytest 설치 후
-pip install pytest torch
+# Install pytest
+pip install pytest
 
-# 테스트 실행
+# Run tests
 cd nano_slime
 python -m pytest tests/ -v
 ```
 
-## 참고
+## References
 
-- 원본 SLIME: [THUDM/slime](https://github.com/THUDM/slime)
-- GRPO 논문: [DeepSeekMath](https://arxiv.org/abs/2402.03300)
-- PPO 논문: [Proximal Policy Optimization](https://arxiv.org/abs/1707.06347)
+- Original SLIME: [THUDM/slime](https://github.com/THUDM/slime)
+- GRPO Paper: [DeepSeekMath](https://arxiv.org/abs/2402.03300)
+- PPO Paper: [Proximal Policy Optimization](https://arxiv.org/abs/1707.06347)
+- SGLang: [sgl-project/sglang](https://github.com/sgl-project/sglang)

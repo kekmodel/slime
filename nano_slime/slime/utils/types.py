@@ -26,23 +26,38 @@ class Sample:
     Attributes:
         tokens: 전체 토큰 시퀀스 (prompt + response)
         response_length: response 부분의 길이
+        total_length: 전체 시퀀스 길이
         reward: 보상 값 (scalar 또는 dict)
         loss_mask: 학습에 사용할 토큰 마스크
         rollout_log_probs: 롤아웃 시점의 log probability
         group_index: GRPO 그룹 인덱스 (같은 prompt의 샘플들은 같은 index)
+        sample_index: 그룹 내 샘플 인덱스
+        prompt_text: 원본 프롬프트 텍스트
+        response_text: 생성된 응답 텍스트
 
     GRPO에서의 역할:
     - 같은 group_index를 가진 샘플들끼리 reward 정규화
     - n_samples_per_prompt개의 샘플이 하나의 그룹
     """
 
-    tokens: list[int]
+    tokens: Any  # list[int] or torch.Tensor
     response_length: int
-    reward: float | dict
-    loss_mask: list[int] | None = None
+    total_length: int = 0
+    reward: float | dict = 0.0
+    loss_mask: Any = None  # list[int] | torch.Tensor | None
     rollout_log_probs: Any = None  # torch.Tensor | None
     group_index: int = 0
+    sample_index: int = 0
+    prompt_text: str = ""
+    response_text: str = ""
     prompt_length: int = 0
+
+    def __post_init__(self):
+        if self.total_length == 0:
+            if hasattr(self.tokens, "__len__"):
+                self.total_length = len(self.tokens)
+        if self.prompt_length == 0:
+            self.prompt_length = self.total_length - self.response_length
 
     def get_reward_value(self, args=None) -> float:
         """reward에서 scalar 값 추출"""
@@ -50,10 +65,6 @@ class Sample:
             # dict인 경우 특정 키 사용 (예: "score")
             return self.reward.get("score", 0.0)
         return float(self.reward)
-
-    @property
-    def total_length(self) -> int:
-        return len(self.tokens)
 
 
 class RolloutBatch(dict):
