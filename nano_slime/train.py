@@ -2,26 +2,31 @@
 Nano SLIME - Main Training Script
 
 This is the main entry point for nano_slime GRPO training.
-Connects SGLang (inference) + FSDP (training) for actual model training.
+Supports two backends:
+1. FSDP: HuggingFace + FSDP2 (simpler, recommended for learning)
+2. Megatron: Megatron-LM + Ray (production, supports TP/PP)
 
 Usage:
     # Single GPU (mock mode for testing)
     python train.py --mock
 
     # Multi-GPU with FSDP
-    torchrun --nproc_per_node=4 train.py --hf-checkpoint <model_path>
+    torchrun --nproc_per_node=4 train.py --backend fsdp --hf-checkpoint <model_path>
+
+    # Multi-GPU with Ray + Megatron
+    python train.py --backend megatron --num-gpus 4 --hf-checkpoint <model_path>
 
     # With SGLang rollout
     python train.py --hf-checkpoint <model_path> --use-sglang
 
 Training Flow:
     1. Initialize SGLang engine (rollout/inference)
-    2. Initialize FSDP actor (training)
+    2. Initialize training actor (FSDP or Megatron)
     3. Main loop:
         a. Generate samples from prompts (SGLang)
         b. Compute rewards
         c. GRPO normalization
-        d. Train actor (FSDP)
+        d. Train actor
         e. Update SGLang weights
         f. Evaluate periodically
 """
@@ -140,6 +145,21 @@ def parse_args() -> Namespace:
                         help="Checkpoint save interval")
     parser.add_argument("--save-dir", type=str, default="./checkpoints")
 
+    # Backend selection
+    parser.add_argument("--backend", type=str, default="fsdp",
+                        choices=["fsdp", "megatron"],
+                        help="Training backend: fsdp (HF+FSDP2) or megatron (Ray+Megatron)")
+    parser.add_argument("--num-gpus", type=int, default=1,
+                        help="Number of GPUs (for Megatron/Ray)")
+    parser.add_argument("--distributed-backend", type=str, default="nccl",
+                        help="Distributed backend")
+
+    # Megatron-specific settings
+    parser.add_argument("--tp-size", type=int, default=1,
+                        help="Tensor parallel size (Megatron)")
+    parser.add_argument("--pp-size", type=int, default=1,
+                        help="Pipeline parallel size (Megatron)")
+
     # Execution mode
     parser.add_argument("--mock", action="store_true",
                         help="Use mock engine for testing without GPU")
@@ -207,14 +227,119 @@ def compute_rewards(
     return samples
 
 
+def create_actor(args: Namespace, rollout_engine: Any):
+    """
+    Create training actor based on backend selection.
+
+    Args:
+        args: Training arguments
+        rollout_engine: Rollout engine for weight sync
+
+    Returns:
+        Actor instance (FSDP or Megatron)
+    """
+    if args.backend == "fsdp":
+        from slime.backends.fsdp.actor import FSDPActor
+        actor = FSDPActor(args)
+        actor.init()
+        actor.register_rollout_engines([rollout_engine])
+        logger.info("FSDP Actor initialized")
+        return actor
+
+    elif args.backend == "megatron":
+        try:
+            import ray
+            if not ray.is_initialized():
+                ray.init()
+
+            from slime.backends.megatron.actor import (
+                create_megatron_actors,
+                init_megatron_actors,
+            )
+
+            # Create Ray actors
+            actors = create_megatron_actors(
+                args,
+                num_gpus=args.num_gpus,
+            )
+            init_megatron_actors(actors, args, role="actor", with_ref=True)
+
+            # Register rollout engines (only first actor manages it)
+            ray.get(actors[0].register_rollout_engines.remote([rollout_engine]))
+
+            logger.info(f"Megatron Actors initialized ({args.num_gpus} GPUs)")
+
+            # Return wrapper for unified interface
+            return MegatronActorWrapper(actors, args)
+
+        except ImportError as e:
+            logger.warning(f"Ray/Megatron not available: {e}")
+            logger.warning("Falling back to mock training")
+            return None
+
+    else:
+        raise ValueError(f"Unknown backend: {args.backend}")
+
+
+class MegatronActorWrapper:
+    """
+    Wrapper for Megatron Ray actors to provide unified interface.
+
+    This allows train_grpo to use the same API for both FSDP and Megatron.
+    """
+
+    def __init__(self, actors: list, args: Namespace):
+        self.actors = actors
+        self.args = args
+
+    def train(self, rollout_id: int, rollout_data: dict) -> dict:
+        """Train on all actors."""
+        import ray
+
+        # Put rollout data in object store
+        rollout_data_ref = ray.put(rollout_data)
+
+        # Train on all actors
+        futures = [
+            actor.train.remote(rollout_id, rollout_data_ref)
+            for actor in self.actors
+        ]
+        results = ray.get(futures)
+        return results[0]  # Return metrics from first actor
+
+    def update_weights(self) -> None:
+        """Update weights on all actors."""
+        import ray
+        futures = [actor.update_weights.remote() for actor in self.actors]
+        ray.get(futures)
+
+    def sleep(self) -> None:
+        """Offload all actors."""
+        import ray
+        futures = [actor.sleep.remote() for actor in self.actors]
+        ray.get(futures)
+
+    def wake_up(self) -> None:
+        """Wake up all actors."""
+        import ray
+        futures = [actor.wake_up.remote() for actor in self.actors]
+        ray.get(futures)
+
+    def register_rollout_engines(self, engines: list) -> None:
+        """Register engines on first actor."""
+        import ray
+        ray.get(self.actors[0].register_rollout_engines.remote(engines))
+
+
 def train_grpo(args: Namespace) -> None:
     """
     Main GRPO training function.
 
-    Connects SGLang inference with FSDP training.
+    Supports both FSDP and Megatron backends.
     """
     logger.info("=" * 60)
     logger.info("Nano SLIME GRPO Training")
+    logger.info(f"Backend: {args.backend}")
     logger.info("=" * 60)
     logger.info(f"Config: {vars(args)}")
 
@@ -254,13 +379,9 @@ def train_grpo(args: Namespace) -> None:
     actor = None
     if args.hf_checkpoint and not args.mock:
         try:
-            from slime.backends.fsdp.actor import FSDPActor
-            actor = FSDPActor(args)
-            actor.init()
-            actor.register_rollout_engines([rollout_engine])
-            logger.info("FSDP Actor initialized")
+            actor = create_actor(args, rollout_engine)
         except Exception as e:
-            logger.warning(f"Could not initialize FSDP Actor: {e}")
+            logger.warning(f"Could not initialize Actor: {e}")
             logger.warning("Running in inference-only mode")
 
     # Main training loop

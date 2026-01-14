@@ -1,8 +1,11 @@
 # Nano SLIME
 
-**Minimal GRPO Training Implementation with SGLang + FSDP**
+**Minimal GRPO Training Implementation with SGLang + FSDP/Megatron**
 
 A learning-focused implementation of SLIME's core GRPO training loop.
+Supports two backends:
+- **FSDP**: HuggingFace + FSDP2 (simpler, recommended for learning)
+- **Megatron**: Ray + Megatron-LM (production, supports TP/PP)
 
 ## Features
 
@@ -15,6 +18,7 @@ A learning-focused implementation of SLIME's core GRPO training loop.
 | use rollout logprobs | `slime/backends/training_utils/loss.py` | Off-policy training |
 | filtering zero std | `slime/rollout/reward.py` | Filter uninformative groups |
 | FSDP Actor | `slime/backends/fsdp/actor.py` | Distributed training with FSDP |
+| Megatron Actor | `slime/backends/megatron/actor.py` | Ray + Megatron distributed training |
 | SGLang Engine | `slime/backends/sglang/engine.py` | Fast inference with SGLang |
 | Slime Router | `slime/router/router.py` | Load balancing for SGLang engines |
 | Routing Replay | `slime/utils/routing_replay.py` | MoE expert routing consistency |
@@ -29,11 +33,19 @@ pip install torch transformers
 # Mock mode (no GPU needed)
 python train.py --mock --num-rollout 5
 
-# With actual model (requires GPU)
-python train.py --hf-checkpoint meta-llama/Llama-3.2-1B --num-rollout 10
+# ===== FSDP Backend (simpler, recommended for learning) =====
+# Single GPU
+python train.py --backend fsdp --hf-checkpoint meta-llama/Llama-3.2-1B
 
-# Multi-GPU with FSDP
-torchrun --nproc_per_node=4 train.py --hf-checkpoint meta-llama/Llama-3.2-1B
+# Multi-GPU with torchrun
+torchrun --nproc_per_node=4 train.py --backend fsdp --hf-checkpoint meta-llama/Llama-3.2-1B
+
+# ===== Megatron Backend (production, supports TP/PP) =====
+# Requires: pip install ray megatron-core
+python train.py --backend megatron --num-gpus 4 --hf-checkpoint meta-llama/Llama-3.2-1B
+
+# With Tensor Parallelism
+python train.py --backend megatron --num-gpus 8 --tp-size 2 --hf-checkpoint <model>
 ```
 
 ## Training Flow
@@ -70,6 +82,8 @@ nano_slime/
 │   │   ├── fsdp/
 │   │   │   ├── actor.py           # FSDP training actor
 │   │   │   └── parallel.py        # Parallel state
+│   │   ├── megatron/
+│   │   │   └── actor.py           # Ray + Megatron training actor
 │   │   ├── sglang/
 │   │   │   └── engine.py          # SGLang inference wrapper
 │   │   └── training_utils/
@@ -146,7 +160,7 @@ ratio = exp(log_probs - old_log_probs)
 
 ## Architecture
 
-### Training (FSDP)
+### Backend: FSDP (Recommended for Learning)
 
 ```python
 # HuggingFace model + FSDP for distributed training
@@ -158,6 +172,27 @@ logits = model(tokens)
 loss = policy_loss_function(logits, advantages, old_log_probs)
 loss.backward()
 optimizer.step()
+```
+
+### Backend: Megatron (Production)
+
+```python
+# Ray actors for distributed training
+import ray
+
+# Create actors across GPUs
+actors = [MegatronTrainRayActor.remote(world_size, rank) for rank in range(num_gpus)]
+ray.get([a.init.remote(args, "actor", with_ref=True) for a in actors])
+
+# Training step (parallel across all actors)
+rollout_data_ref = ray.put(rollout_data)
+futures = [a.train.remote(rollout_id, rollout_data_ref) for a in actors]
+ray.get(futures)
+
+# Megatron supports:
+# - Tensor Parallelism (TP): Split model across GPUs
+# - Pipeline Parallelism (PP): Split layers across stages
+# - Data Parallelism (DP): Replicate for larger batches
 ```
 
 ### Inference (SGLang)
