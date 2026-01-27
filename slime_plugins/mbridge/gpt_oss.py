@@ -113,16 +113,33 @@ class GptOssBridge(LLMBridge):
 
         # YaRN RoPE scaling parameters
         rope_scaling = getattr(hf_config, "rope_scaling", None) or {}
+
+        # Extract YaRN config with defaults matching HuggingFace GPT-OSS config
         yarn_config = {
             "rotary_scaling_factor": rope_scaling.get("factor", self.DEFAULT_YARN_FACTOR),
             "beta_fast": rope_scaling.get("beta_fast", self.DEFAULT_YARN_BETA_FAST),
             "beta_slow": rope_scaling.get("beta_slow", self.DEFAULT_YARN_BETA_SLOW),
+            # CRITICAL: rope_type must be set for YaRN to work!
+            "rope_type": rope_scaling.get("type", "yarn"),
         }
-        # Original max position embeddings for YaRN
+
+        # Original max position embeddings for YaRN calculation
+        # This is REQUIRED for YaRN - tells the RoPE how to scale from original context length
         original_max_pos = rope_scaling.get(
             "original_max_position_embeddings",
             self.DEFAULT_YARN_ORIGINAL_MAX_POS
         )
+
+        # Handle original_max_position_embeddings based on megatron.core version
+        # mcore >= 0.14: use original_max_position_embeddings
+        # mcore < 0.14: use max_position_embeddings (in config, not gptmodel_args)
+        import megatron.core
+        megatron_version = getattr(megatron.core, "__version__", "0.0.0")
+        if megatron_version >= "0.14":
+            yarn_config["original_max_position_embeddings"] = original_max_pos
+        else:
+            # For older mcore, set in config (may be overwritten by gptmodel_args)
+            yarn_config["max_position_embeddings"] = original_max_pos
 
         return self._build_base_config(
             use_cpu_initialization=False,
@@ -166,7 +183,9 @@ class GptOssBridge(LLMBridge):
             # RoPE/YaRN Settings
             # ===========================================
             rotary_interleaved=False,
-            # YaRN scaling parameters
+            # rotary_base MUST be set in config for correct RoPE scaling
+            rotary_base=getattr(hf_config, "rope_theta", self.DEFAULT_ROPE_THETA),
+            # YaRN scaling parameters (includes rope_type, original_max_position_embeddings)
             **yarn_config,
 
             # ===========================================
