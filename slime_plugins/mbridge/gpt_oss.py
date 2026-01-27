@@ -144,15 +144,24 @@ class GptOssBridge(LLMBridge):
         return self._build_base_config(
             use_cpu_initialization=False,
             # ===========================================
-            # Activation function (CRITICAL: QuickGELU, NOT silu!)
+            # Activation function (CRITICAL: Custom QuickGELU GLU)
             # ===========================================
+            # GPT-OSS uses a unique GLU variant (from HF modeling_gpt_oss.py):
+            #   gate = gate.clamp(max=7.0)
+            #   up = up.clamp(min=-7.0, max=7.0)
+            #   glu = gate * sigmoid(gate * 1.702)  # QuickGELU on gate
+            #   output = (up + 1.0) * glu           # offset +1 on up projection
+            #
+            # In Megatron-Core terms:
+            # - activation_func: quick_gelu (x * sigmoid(1.702 * x)) applied to gate
+            # - gated_linear_unit: True (GLU structure)
+            # - glu_linear_offset: 1.0 (the +1 offset on up projection)
+            # - activation_func_clamp_value: 7.0 (clamp both gate and up)
+            #
+            # Note: glu_linear_offset and activation_func_clamp_value may require
+            # Megatron-Core >= 0.14 or custom layer modifications
             activation_func=quick_gelu,
             gated_linear_unit=True,
-            # GLU settings from Megatron-Bridge
-            # glu_linear_offset: offset added before GLU gate (up + 1.0) * glu
-            # activation_func_clamp_value: clamp output to [-7.0, 7.0]
-            # Note: These may not be directly supported in mbridge, but we set them
-            # for compatibility with Megatron-Core if available
 
             # ===========================================
             # MoE Configuration
@@ -198,12 +207,22 @@ class GptOssBridge(LLMBridge):
             bias_activation_fusion=True,
 
             # ===========================================
-            # Sliding Window Attention (Megatron-Bridge settings)
+            # Sliding Window Attention (from HF config)
             # ===========================================
-            # window_size: (128, 0) - 128 tokens left, 0 right (causal)
-            # window_attn_skip_freq: 2 - every 2nd layer uses full attention
-            # softmax_type: "learnable" - enables sink tokens
-            # Note: These require Megatron-Core/TE support
+            # GPT-OSS uses alternating sliding/full attention layers:
+            # - sliding_window: 128 tokens (layer_type == "sliding_attention")
+            # - full_attention: no window limit (layer_type == "full_attention")
+            # - Pattern: alternating by layer index
+            #
+            # Sink tokens for attention stability:
+            # - shape: (num_attention_heads,) = (64,) for 120B
+            # - Concatenated to attention weights before softmax
+            # - Discarded after normalization
+            #
+            # Megatron-Core config (if supported):
+            # - window_size: (128, 0) for sliding layers
+            # - window_attn_skip_freq: could alternate layers
+            # - softmax_type: "learnable" for sink tokens
         )
 
     def _get_gptmodel_args(self) -> dict:
