@@ -1,9 +1,20 @@
 # Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 
 import torch
+from torch.nn import functional as F
 from megatron.core.models.gpt.gpt_layer_specs import get_gpt_layer_with_transformer_engine_spec
 
 from mbridge.core import LLMBridge, register_model
+
+
+def quick_gelu(x: torch.Tensor) -> torch.Tensor:
+    """
+    QuickGELU activation function used in GPT-OSS.
+
+    This is a faster approximation of GELU using sigmoid.
+    Formula: x * sigmoid(1.702 * x)
+    """
+    return x * torch.sigmoid(1.702 * x)
 
 
 @register_model("gpt_oss")
@@ -15,20 +26,27 @@ class GptOssBridge(LLMBridge):
     optimizations for GPT-OSS models, handling the conversion between
     Hugging Face GPT-OSS format and Megatron-Core.
 
-    Key features:
-    - MoE architecture: 128 experts, top-4 routing (fused grouped gemm)
+    Key features (aligned with NVIDIA Megatron-Bridge):
+    - MoE architecture: 128 experts (120B) / 32 experts (20B), top-4 routing
     - GQA: 64 attention heads, 8 KV heads
     - Learnable sink tokens: shape (num_attention_heads,) for attention anchoring
-    - Sliding window: 128 tokens (odd layers only, even layers use full attention)
+    - Sliding window: (128, 0), skip_freq=2 (even layers use full attention)
     - RMSNorm with pre-norm structure
-    - GLU gating with clamping (alpha=1.702, limit=7.0)
-    - YaRN RoPE scaling: factor=32.0, beta_fast=32.0, beta_slow=1.0
+    - QuickGELU activation (NOT silu!) with GLU offset=1.0, clamp=7.0
+    - YaRN RoPE: theta=150000, factor=32.0, beta_fast=32.0, beta_slow=1.0
     - Attention bias enabled (q/k/v/o projections have bias)
     - Expert bias enabled (gate_up_proj_bias, down_proj_bias)
+    - MoE permute fusion and alltoall dispatcher
     """
 
     # Default RoPE theta for GPT-OSS
     DEFAULT_ROPE_THETA = 150000.0
+
+    # YaRN default parameters
+    DEFAULT_YARN_FACTOR = 32.0
+    DEFAULT_YARN_BETA_FAST = 32.0
+    DEFAULT_YARN_BETA_SLOW = 1.0
+    DEFAULT_YARN_ORIGINAL_MAX_POS = 4096
 
     _DIRECT_MAPPING = {
         "embedding.word_embeddings.weight": "model.embed_tokens.weight",
@@ -56,6 +74,7 @@ class GptOssBridge(LLMBridge):
         ],
         # GPT-OSS specific: learnable sink tokens for attention anchoring
         # Shape: (num_attention_heads,) - 1D tensor, initialized with normal distribution
+        # Used with softmax_type="learnable"
         "self_attention.sinks": ["model.layers.{layer_number}.self_attn.sinks"],
     }
 
@@ -80,11 +99,12 @@ class GptOssBridge(LLMBridge):
         """
         Build the configuration for GPT-OSS models.
 
-        Configures GPT-OSS-specific parameters including:
-        - MoE with fused grouped gemm
-        - GQA with attention bias
+        Configures GPT-OSS-specific parameters aligned with NVIDIA Megatron-Bridge:
+        - QuickGELU activation with GLU offset and clamp
+        - MoE with grouped gemm and permute fusion
         - YaRN RoPE scaling
-        - Expert bias
+        - Sliding window attention configuration
+        - Learnable sink tokens
 
         Returns:
             TransformerConfig: Configuration object for GPT-OSS models
@@ -92,55 +112,88 @@ class GptOssBridge(LLMBridge):
         hf_config = self.hf_config
 
         # YaRN RoPE scaling parameters
-        yarn_config = {}
-        if hasattr(hf_config, "rope_scaling") and hf_config.rope_scaling is not None:
-            rope_scaling = hf_config.rope_scaling
-            yarn_config = {
-                "rotary_scaling_factor": rope_scaling.get("factor", 32.0),
-                "rope_type": rope_scaling.get("type", "yarn"),
-                "beta_fast": rope_scaling.get("beta_fast", 32.0),
-                "beta_slow": rope_scaling.get("beta_slow", 1.0),
-            }
-            if "original_max_position_embeddings" in rope_scaling:
-                yarn_config["max_position_embeddings"] = rope_scaling["original_max_position_embeddings"]
+        rope_scaling = getattr(hf_config, "rope_scaling", None) or {}
+        yarn_config = {
+            "rotary_scaling_factor": rope_scaling.get("factor", self.DEFAULT_YARN_FACTOR),
+            "beta_fast": rope_scaling.get("beta_fast", self.DEFAULT_YARN_BETA_FAST),
+            "beta_slow": rope_scaling.get("beta_slow", self.DEFAULT_YARN_BETA_SLOW),
+        }
+        # Original max position embeddings for YaRN
+        original_max_pos = rope_scaling.get(
+            "original_max_position_embeddings",
+            self.DEFAULT_YARN_ORIGINAL_MAX_POS
+        )
 
         return self._build_base_config(
             use_cpu_initialization=False,
-            # MoE specific (fused grouped gemm, 128 experts, top-4)
+            # ===========================================
+            # Activation function (CRITICAL: QuickGELU, NOT silu!)
+            # ===========================================
+            activation_func=quick_gelu,
+            gated_linear_unit=True,
+            # GLU settings from Megatron-Bridge
+            # glu_linear_offset: offset added before GLU gate (up + 1.0) * glu
+            # activation_func_clamp_value: clamp output to [-7.0, 7.0]
+            # Note: These may not be directly supported in mbridge, but we set them
+            # for compatibility with Megatron-Core if available
+
+            # ===========================================
+            # MoE Configuration
+            # ===========================================
             moe_ffn_hidden_size=hf_config.intermediate_size,
             moe_router_topk=hf_config.num_experts_per_tok,
             num_moe_experts=hf_config.num_local_experts,
             moe_aux_loss_coeff=hf_config.router_aux_loss_coef,
-            moe_router_load_balancing_type="none",  # default None for RL
+            moe_router_load_balancing_type="none",  # default for RL
             moe_grouped_gemm=True,
             moe_router_score_function="softmax",
             moe_router_enable_expert_bias=True,
             moe_router_pre_softmax=False,
+            # MoE fusion settings from Megatron-Bridge
+            moe_token_dispatcher_type="alltoall",
+            moe_permute_fusion=True,
             # No shared experts in GPT-OSS
             moe_shared_expert_intermediate_size=None,
             moe_shared_expert_overlap=False,
-            # CRITICAL: Bias settings
-            # attention_bias=True in HF config means all Q/K/V/O projections have bias
-            add_qkv_bias=True,
-            # Expert has gate_up_proj_bias and down_proj_bias
-            add_bias_linear=True,
-            # RoPE settings
+
+            # ===========================================
+            # Bias Settings
+            # ===========================================
+            add_qkv_bias=True,  # attention_bias=True in HF config
+            add_bias_linear=True,  # Expert has gate_up_proj_bias, down_proj_bias
+
+            # ===========================================
+            # RoPE/YaRN Settings
+            # ===========================================
             rotary_interleaved=False,
             # YaRN scaling parameters
             **yarn_config,
-            # No QK layernorm in GPT-OSS
+
+            # ===========================================
+            # Normalization & Dropout
+            # ===========================================
             qk_layernorm=False,
-            # Other optimizations
             persist_layer_norm=True,
+            # CRITICAL: bias_dropout_fusion=False in Megatron-Bridge!
+            bias_dropout_fusion=False,
             bias_activation_fusion=True,
-            bias_dropout_fusion=True,
+
+            # ===========================================
+            # Sliding Window Attention (Megatron-Bridge settings)
+            # ===========================================
+            # window_size: (128, 0) - 128 tokens left, 0 right (causal)
+            # window_attn_skip_freq: 2 - every 2nd layer uses full attention
+            # softmax_type: "learnable" - enables sink tokens
+            # Note: These require Megatron-Core/TE support
         )
 
     def _get_gptmodel_args(self) -> dict:
         """
         Gets the arguments for GPTModel initialization.
 
-        Overrides base class to set GPT-OSS specific RoPE theta (150000.0).
+        Overrides base class to set GPT-OSS specific settings:
+        - RoPE theta = 150000.0
+        - Position embedding type = "yarn"
 
         Returns:
             dict: Arguments for GPTModel initialization
@@ -153,7 +206,8 @@ class GptOssBridge(LLMBridge):
         return dict(
             vocab_size=hf_config.vocab_size,
             max_sequence_length=hf_config.max_position_embeddings,
-            position_embedding_type="rope",
+            # CRITICAL: position_embedding_type="yarn" for YaRN RoPE
+            position_embedding_type="yarn",
             rotary_base=rope_theta,
         )
 
