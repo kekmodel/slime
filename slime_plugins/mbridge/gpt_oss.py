@@ -84,15 +84,25 @@ class GptOssBridge(LLMBridge):
         # MoE router (with bias)
         "mlp.router.weight": ["model.layers.{layer_number}.mlp.router.weight"],
         "mlp.router.bias": ["model.layers.{layer_number}.mlp.router.bias"],
-        # Fused MoE experts (grouped gemm format)
-        # gate_up_proj shape: (num_experts, hidden_size, 2*intermediate_size)
-        "mlp.experts.linear_fc1.weight": ["model.layers.{layer_number}.mlp.experts.gate_up_proj"],
-        # gate_up_proj_bias shape: (num_experts, 2*intermediate_size)
-        "mlp.experts.linear_fc1.bias": ["model.layers.{layer_number}.mlp.experts.gate_up_proj_bias"],
-        # down_proj shape: (num_experts, intermediate_size, hidden_size)
-        "mlp.experts.linear_fc2.weight": ["model.layers.{layer_number}.mlp.experts.down_proj"],
-        # down_proj_bias shape: (num_experts, hidden_size)
-        "mlp.experts.linear_fc2.bias": ["model.layers.{layer_number}.mlp.experts.down_proj_bias"],
+        # GPT-OSS uses FUSED expert weights (different from Mixtral/Qwen2MoE)
+        # HF shape: (num_experts, hidden_size, 2*intermediate_size) for gate_up_proj
+        # HF shape: (num_experts, intermediate_size, hidden_size) for down_proj
+        # The expert_id is the first dimension, not a separate parameter
+        #
+        # Mapping strategy: Each mcore per-expert weight maps to the same fused HF weight
+        # The expert_id is extracted from mcore name and used to slice the fused tensor
+        "mlp.experts.linear_fc1": [
+            "model.layers.{layer_number}.mlp.experts.gate_up_proj",
+        ],
+        "mlp.experts.linear_fc2": [
+            "model.layers.{layer_number}.mlp.experts.down_proj",
+        ],
+    }
+
+    # Bias mappings for fused experts
+    _MLP_BIAS_MAPPING = {
+        "mlp.experts.linear_fc1": "model.layers.{layer_number}.mlp.experts.gate_up_proj_bias",
+        "mlp.experts.linear_fc2": "model.layers.{layer_number}.mlp.experts.down_proj_bias",
     }
 
     def _build_config(self):
@@ -249,9 +259,12 @@ class GptOssBridge(LLMBridge):
             rotary_base=rope_theta,
         )
 
-    def _get_transformer_layer_spec(self):
+    def _get_transformer_layer_spec(self, vp_stage=None):
         """
         Gets the transformer layer specification.
+
+        Args:
+            vp_stage: Virtual pipeline stage (for VPP compatibility with base class)
 
         Returns:
             TransformerLayerSpec: Specification for transformer layers
@@ -311,7 +324,15 @@ class GptOssBridge(LLMBridge):
         """
         Map MLP-related MCore weight names to HuggingFace weight names.
 
-        Handles fused expert weights (grouped gemm format) and expert biases.
+        GPT-OSS uses FUSED expert weights where all experts are in a single tensor
+        with shape (num_experts, ...). This is different from Mixtral/Qwen2MoE
+        which have individual expert weights.
+
+        For fused experts:
+        - MCore name: decoder.layers.X.mlp.experts.linear_fc1.weight{expert_id}
+        - HF name: model.layers.X.mlp.experts.gate_up_proj (same for all experts)
+
+        The expert_id is used in _weight_to_mcore_format to slice the fused tensor.
 
         Args:
             name: MCore weight name containing MLP parameters
@@ -322,10 +343,30 @@ class GptOssBridge(LLMBridge):
         layer_number = name.split(".")[2]
         convert_names = []
 
-        for keyword, mapping_names in self._MLP_MAPPING.items():
-            if keyword in name:
-                convert_names.extend([x.format(layer_number=layer_number) for x in mapping_names])
-                break
+        # Handle fused expert weights
+        if "mlp.experts.linear_fc" in name:
+            # Check if it's a bias
+            is_bias = ".bias" in name or name.endswith("bias")
+
+            if is_bias:
+                # Find the matching bias mapping
+                for keyword, mapping_name in self._MLP_BIAS_MAPPING.items():
+                    if keyword in name:
+                        convert_names.append(mapping_name.format(layer_number=layer_number))
+                        break
+            else:
+                # Weight mapping - same fused HF weight for all expert_ids
+                for keyword, mapping_names in self._MLP_MAPPING.items():
+                    if keyword in name and "experts" in keyword:
+                        convert_names.extend([x.format(layer_number=layer_number) for x in mapping_names])
+                        break
+
+        # Handle non-expert MLP parameters (router, layernorm)
+        if len(convert_names) == 0:
+            for keyword, mapping_names in self._MLP_MAPPING.items():
+                if keyword in name:
+                    convert_names.extend([x.format(layer_number=layer_number) for x in mapping_names])
+                    break
 
         if len(convert_names) == 0:
             raise NotImplementedError(f"Unsupported MLP parameter name: {name}")
@@ -340,7 +381,11 @@ class GptOssBridge(LLMBridge):
         Handles special cases:
         - QKV weight/bias merging for GQA
         - Sink tokens passthrough (shape: num_attention_heads)
-        - Fused expert weights for grouped gemm
+        - Fused expert weights: slice from fused HF tensor using expert_id
+
+        For GPT-OSS fused experts:
+        - HF has fused tensor: (num_experts, hidden, 2*inter) for gate_up_proj
+        - MCore expects per-expert: extract weight[expert_id] from fused tensor
 
         Args:
             mcore_weights_name: Target MCore weight name
@@ -366,10 +411,26 @@ class GptOssBridge(LLMBridge):
             assert hf_weights[0].dim() == 1, f"Sinks should be 1D, got {hf_weights[0].dim()}D"
             return hf_weights[0]
 
-        # Handle fused expert weights/biases (already in grouped gemm format)
-        if "mlp.experts" in mcore_weights_name:
-            assert len(hf_weights) == 1
-            return hf_weights[0]
+        # Handle fused expert weights/biases
+        # GPT-OSS HF format: (num_experts, ...) - extract specific expert
+        if "mlp.experts.linear_fc" in mcore_weights_name:
+            assert len(hf_weights) == 1, f"Expected 1 fused tensor, got {len(hf_weights)}"
+            fused_weights = hf_weights[0]
+
+            # Extract expert_id from mcore weight name
+            # Format: decoder.layers.X.mlp.experts.linear_fc1.weight{expert_id}
+            # or: decoder.layers.X.mlp.experts.linear_fc1.bias{expert_id}
+            if ".weight" in mcore_weights_name:
+                expert_id = int(mcore_weights_name.split(".weight")[-1])
+            elif ".bias" in mcore_weights_name:
+                expert_id = int(mcore_weights_name.split(".bias")[-1])
+            else:
+                # Fallback: assume suffix is expert_id
+                expert_id = int(mcore_weights_name.split(".")[-1].replace("weight", "").replace("bias", "") or "0")
+
+            # Slice the fused tensor to get this expert's weight
+            # Fused shape: (num_experts, ...) -> extract index expert_id
+            return fused_weights[expert_id].contiguous()
 
         # Default: single weight tensor
         if len(hf_weights) == 1:
@@ -453,7 +514,12 @@ class GptOssBridge(LLMBridge):
         Handles special cases:
         - QKV weight/bias splitting for GQA export
         - Sink tokens passthrough
-        - Fused expert weights/biases
+        - Fused expert weights: accumulate per-expert weights and combine
+
+        For GPT-OSS fused experts:
+        - MCore has per-expert weights (from grouped gemm)
+        - HF expects fused tensor: (num_experts, ...)
+        - Use export_weights_buff to accumulate, return fused when complete
 
         Args:
             mcore_weights_name: MCore weight name
@@ -481,12 +547,87 @@ class GptOssBridge(LLMBridge):
             hf_name = f"model.layers.{layer_number}.self_attn.sinks"
             return [hf_name], [mcore_weights]
 
-        # Handle fused expert weights/biases (passthrough - already in correct format)
-        if "mlp.experts" in mcore_weights_name:
-            hf_names = self._weight_name_mapping_mlp(mcore_weights_name)
-            return hf_names, [mcore_weights]
+        # Handle fused expert weights/biases
+        # Accumulate per-expert weights and combine into fused tensor
+        if "mlp.experts.linear_fc" in mcore_weights_name:
+            return self._accumulate_expert_weight(mcore_weights_name, mcore_weights, layer_number)
 
         return super()._weight_to_hf_format(mcore_weights_name, mcore_weights)
+
+    def _accumulate_expert_weight(
+        self, mcore_weights_name: str, mcore_weights: torch.Tensor, layer_number: str
+    ) -> tuple[list[str], list[torch.Tensor]]:
+        """
+        Accumulate per-expert weights and combine into fused HF tensor.
+
+        GPT-OSS HF format uses fused expert tensors: (num_experts, ...)
+        MCore with grouped gemm has per-expert weights that need to be combined.
+
+        Uses export_weights_buff to accumulate weights until all experts are collected.
+
+        Args:
+            mcore_weights_name: MCore weight name with expert_id suffix
+            mcore_weights: Single expert weight tensor
+            layer_number: Layer number string
+
+        Returns:
+            tuple: ([], []) while accumulating, ([hf_name], [fused_tensor]) when complete
+        """
+        num_experts = self.config.num_moe_experts
+
+        # Determine weight type and expert_id
+        # Format: decoder.layers.X.mlp.experts.linear_fc1.weight{expert_id}
+        if ".weight" in mcore_weights_name:
+            name_prefix = mcore_weights_name.rsplit(".weight", 1)[0]
+            expert_id = int(mcore_weights_name.split(".weight")[-1])
+            is_weight = True
+        else:
+            name_prefix = mcore_weights_name.rsplit(".bias", 1)[0]
+            expert_id = int(mcore_weights_name.split(".bias")[-1])
+            is_weight = False
+
+        # Create buffer key (unique per layer and weight type)
+        buffer_key = f"{name_prefix}.{'weight' if is_weight else 'bias'}"
+
+        # Initialize buffer if needed
+        if buffer_key not in self.export_weights_buff:
+            self.export_weights_buff[buffer_key] = {
+                "weights": {},
+                "num_experts": num_experts,
+                "is_weight": is_weight,
+                "layer_number": layer_number,
+            }
+
+        # Store this expert's weight
+        self.export_weights_buff[buffer_key]["weights"][expert_id] = mcore_weights
+
+        # Check if all experts are collected
+        if len(self.export_weights_buff[buffer_key]["weights"]) == num_experts:
+            # All experts collected, combine into fused tensor
+            buff_data = self.export_weights_buff.pop(buffer_key)
+            weights_dict = buff_data["weights"]
+
+            # Stack experts in order: (num_experts, ...)
+            fused_weights = torch.stack(
+                [weights_dict[i] for i in range(num_experts)], dim=0
+            )
+
+            # Determine HF weight name
+            if "linear_fc1" in name_prefix:
+                if is_weight:
+                    hf_name = f"model.layers.{layer_number}.mlp.experts.gate_up_proj"
+                else:
+                    hf_name = f"model.layers.{layer_number}.mlp.experts.gate_up_proj_bias"
+            else:  # linear_fc2
+                if is_weight:
+                    hf_name = f"model.layers.{layer_number}.mlp.experts.down_proj"
+                else:
+                    hf_name = f"model.layers.{layer_number}.mlp.experts.down_proj_bias"
+
+            return [hf_name], [fused_weights]
+
+        # Still accumulating, return empty to skip this weight for now
+        return [], []
 
     def _split_qkv_weights(self, qkv_weights: torch.Tensor) -> list[torch.Tensor]:
         """
