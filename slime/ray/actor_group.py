@@ -31,7 +31,7 @@ class RayTrainGroup:
         args,
         num_nodes,
         num_gpus_per_node,
-        pg: tuple[PlacementGroup, list[int]],
+        pg: tuple[PlacementGroup, list[int], list[int]],
         num_gpus_per_actor: float = 1,
         role: str = "actor",
     ) -> None:
@@ -48,13 +48,13 @@ class RayTrainGroup:
 
         # Use placement group to lock resources for models of same type
         assert pg is not None
-        pg, reordered_bundle_indices = pg
+        pg, reordered_bundle_indices, _reordered_gpu_ids = pg
 
         env_vars = {
             # because sglang will always set NCCL_CUMEM_ENABLE to 0
             # we need also set it to 0 to prevent nccl error.
             "NCCL_CUMEM_ENABLE": os.environ.get("NCCL_CUMEM_ENABLE", "0"),
-            "NVTE_FP8_BLOCK_SCALING_FP32_SCALES": "1",
+            "NVTE_FP8_BLOCK_SCALING_FP32_SCALES": os.environ.get("NVTE_FP8_BLOCK_SCALING_FP32_SCALES", "1"),
             **{name: "1" for name in NOSET_VISIBLE_DEVICES_ENV_VARS_LIST},
             **self.args.train_env_vars,
         }

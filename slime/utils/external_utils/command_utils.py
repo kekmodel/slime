@@ -10,8 +10,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from slime.utils.external_utils.typer_utils import dataclass_cli
 from slime.utils.misc import exec_command
-from slime.utils.typer_utils import dataclass_cli
 
 _ = exec_command, dataclass_cli
 
@@ -213,12 +213,13 @@ def get_default_wandb_args(test_file: str, run_name_prefix: str | None = None, r
     if (x := run_name_prefix) is not None:
         wandb_run_name = f"{x}_{wandb_run_name}"
 
-    # do not put wandb_api_key value here to avoid leaking to logs explicitly
+    # Use the actual key value from environment to avoid shell expansion issues
+    wandb_key = os.environ.get("WANDB_API_KEY")
     return (
         "--use-wandb "
         f"--wandb-project slime-{test_name} "
         f"--wandb-group {wandb_run_name} "
-        f"--wandb-key ${{WANDB_API_KEY}} "
+        f"--wandb-key '{wandb_key}' "
         "--disable-wandb-random-suffix "
     )
 
