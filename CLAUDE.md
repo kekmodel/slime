@@ -146,9 +146,9 @@ Enable for better GPU utilization:
 --max-tokens-per-gpu 4608
 ```
 
-## Debugging
+## Gotchas
 
-### Separate Training/Inference Debugging
+### Debug Flags
 
 - `--debug-rollout-only`: Only initialize SGLang (for debugging inference)
 - `--debug-train-only`: Only initialize Megatron (for debugging training)
