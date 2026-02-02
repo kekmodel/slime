@@ -21,6 +21,13 @@ Key directories:
 - `slime/utils/`: Shared utilities (arguments, distributed utils, timers, etc.)
 - `scripts/`: Training scripts and model configurations
 - `tools/`: Conversion scripts between HF and Megatron formats
+- `examples/`: Usage examples and experimental features
+  - `slime_gym/`: OpenAI Gym-style RL environment wrapper
+  - `tool_calling/`: Tool calling benchmarks and model evaluation
+  - `multi_agent/`: Multi-agent RL examples
+  - `tau-bench/`, `tau2-bench/`: Agent benchmark integrations
+  - `eval/`, `eval_multi_task/`: Evaluation pipelines
+  - `search-r1/`: Search-augmented reasoning examples
 
 ## Development Commands
 
