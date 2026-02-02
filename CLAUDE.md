@@ -26,17 +26,19 @@ Key directories:
 
 ### Environment Setup
 ```bash
-# Use Docker (recommended)
+source .venv/bin/activate
+uv pip install -e .
+
+# If .venv doesn't exist
+uv venv --python 3.12
+```
+
+Docker alternative:
+```bash
 docker pull slimerl/slime:latest
 docker run --rm --gpus all --ipc=host --shm-size=16g \
   --ulimit memlock=-1 --ulimit stack=67108864 \
   -it slimerl/slime:latest /bin/bash
-
-# Install slime in development mode
-pip install -e .
-
-# For FSDP support
-pip install -e ".[fsdp]"
 ```
 
 ### Code Quality
@@ -49,6 +51,7 @@ pre-commit install
 pre-commit run --all-files --show-diff-on-failure --color=always
 
 # Individual formatters/linters (via pre-commit)
+# - ruff: linting (E, F, B, UP rules)
 # - autoflake: removes unused imports
 # - isort: sorts imports (black-compatible profile)
 # - black: code formatter (line length: 119)
@@ -247,3 +250,4 @@ Download FP8 model variant (e.g., `Qwen/Qwen3-4B-FP8`) and set:
 
 - `train.py`: Standard synchronous training
 - `train_async.py`: Fully asynchronous training mode (experimental)
+

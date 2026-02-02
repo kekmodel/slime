@@ -35,6 +35,10 @@ ignore = [
     "E501", # Line too long # TODO handle it later
 ]
 
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
 [tool.pytest.ini_options]
 # durations=0 will display all tests execution time, sorted in ascending order starting from from the slowest one.
 # -vv will also display tests with duration = 0.00s
@@ -66,6 +70,8 @@ markers = [
     "docs: mark tests related to documentation (deselect with '-m \"not docs\"')",
     "skipduringci: marks tests that are skipped ci as they are addressed by Jenkins jobs but should be run to test user setups",
     "pleasefixme: marks tests that are broken and need fixing",
+    "slow: marks tests that are slow (e.g., large model tokenizers) (deselect with '-m \"not slow\"')",
+    "network: marks tests that require network access (e.g., API calls) (deselect with '-m \"not network\"')",
 ]
 
 [dependency-groups]
