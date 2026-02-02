@@ -92,7 +92,7 @@ python examples/tool_calling/benchmarks/reasoning_length.py -n 30      # 30회 �
 
 ### Multi-Turn
 
-> 전체 대화 측정: greeting → price_req → calc_req → final
+> 인사 → 가격 조회 도구(2개) → 계산 도구 → 최종 응답 시나리오 (병렬 tool calling 지원시 4턴, 미지원시 5턴)
 
 | Model | R.Avg | R.Range | R.CV | C.Avg | Turns | Acc | Parallel |
 |-------|-------|---------|------|-------|-------|-----|----------|
