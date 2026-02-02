@@ -121,7 +121,7 @@ python examples/tool_calling/benchmarks/reasoning_length.py -n 30      # 30회 �
 | **R.CV** | Reasoning 변동계수 (낮을수록 안정적) |
 | **C.Avg** | Content 평균 토큰 수 |
 | **Turns** | 평균 대화 턴 수 |
-| **Acc** | Tool calling 순서 정확도 (price_req → calc_req) |
+| **Acc** | Tool calling 순서 정확도 (price_req x2 → calc_req) |
 | **Parallel** | 병렬 tool call 지원 여부 |
 
 ### 표 정렬 규칙
