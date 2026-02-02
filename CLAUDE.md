@@ -146,6 +146,39 @@ Enable for better GPU utilization:
 --max-tokens-per-gpu 4608
 ```
 
+## Entry Points
+
+- `train.py` - Synchronous training (default)
+- `train_async.py` - Asynchronous training (experimental)
+- `slime/utils/arguments.py` - All argument definitions (reference)
+
+## Model Configurations
+
+Model configs are in `scripts/models/`. When using a model:
+1. Source the appropriate config: `source scripts/models/glm4-9B.sh`
+2. Verify parameters match your model version (especially `--rotary-base`)
+3. Override if needed: `MODEL_ARGS+=(--rotary-base 10000)`
+
+Note: slime uses data packing (varlen/thd), so `--seq-length` and `--max-positional-embedding` don't limit context length.
+
+## Advanced Features
+
+### Dynamic Sampling (DAPO-style)
+```bash
+--over-sampling-batch-size 64 \  # > rollout-batch-size
+--dynamic-sampling-filter-path slime.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
+```
+
+### Partial Rollout
+Enable `--partial-rollout` to cache and continue aborted samples from dynamic sampling. Customize extraction via `--buffer-filter-path`.
+
+### bf16 Training + fp8 Inference
+Download FP8 model variant (e.g., `Qwen/Qwen3-4B-FP8`) and set:
+```bash
+--hf-checkpoint /path/to/Qwen3-4B-FP8
+--ref-load /path/to/bf16_torch_dist  # Still use bf16 for training
+```
+
 ## Gotchas
 
 ### Debug Flags
@@ -175,37 +208,3 @@ Enable for better GPU utilization:
 - **OOM on second step (colocated mode)**: Reduce `--sglang-mem-fraction-static`
 - **Embedding conversion issues**: Manually set `--vocab-size` during torch_dist→HF conversion (Megatron pads embeddings)
 - **Precision issues with Transformer Engine**: Use `--attention-backend flash`
-
-## Model Configurations
-
-Model configs are in `scripts/models/`. When using a model:
-1. Source the appropriate config: `source scripts/models/glm4-9B.sh`
-2. Verify parameters match your model version (especially `--rotary-base`)
-3. Override if needed: `MODEL_ARGS+=(--rotary-base 10000)`
-
-Note: slime uses data packing (varlen/thd), so `--seq-length` and `--max-positional-embedding` don't limit context length.
-
-## Advanced Features
-
-### Dynamic Sampling (DAPO-style)
-```bash
---over-sampling-batch-size 64 \  # > rollout-batch-size
---dynamic-sampling-filter-path slime.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
-```
-
-### Partial Rollout
-Enable `--partial-rollout` to cache and continue aborted samples from dynamic sampling. Customize extraction via `--buffer-filter-path`.
-
-### bf16 Training + fp8 Inference
-Download FP8 model variant (e.g., `Qwen/Qwen3-4B-FP8`) and set:
-```bash
---hf-checkpoint /path/to/Qwen3-4B-FP8
---ref-load /path/to/bf16_torch_dist  # Still use bf16 for training
-```
-
-## Entry Points
-
-- `train.py` - Synchronous training (default)
-- `train_async.py` - Asynchronous training (experimental)
-- `slime/utils/arguments.py` - All argument definitions (reference)
-
