@@ -199,3 +199,4 @@ examples/tool_calling/.env
 # Tool calling test results (timestamped files, keep *_latest.json for reference)
 examples/tool_calling/tests/*_20*.json
 examples/tool_calling/tests/*_20*.txt
+examples/tool_calling/tests/outputs/debug/
