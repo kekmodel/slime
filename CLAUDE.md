@@ -21,13 +21,7 @@ Key directories:
 - `slime/utils/`: Shared utilities (arguments, distributed utils, timers, etc.)
 - `scripts/`: Training scripts and model configurations
 - `tools/`: Conversion scripts between HF and Megatron formats
-- `examples/`: Usage examples and experimental features
-  - `slime_gym/`: OpenAI Gym-style RL environment wrapper
-  - `tool_calling/`: Tool calling benchmarks and model evaluation
-  - `multi_agent/`: Multi-agent RL examples
-  - `tau-bench/`, `tau2-bench/`: Agent benchmark integrations
-  - `eval/`, `eval_multi_task/`: Evaluation pipelines
-  - `search-r1/`: Search-augmented reasoning examples
+- `examples/`: Usage examples (slime_gym, tool_calling, multi_agent, eval, etc.)
 
 ## Development Commands
 
@@ -38,14 +32,6 @@ uv pip install -e .
 
 # If .venv doesn't exist
 uv venv --python 3.12
-```
-
-Docker alternative:
-```bash
-docker pull slimerl/slime:latest
-docker run --rm --gpus all --ipc=host --shm-size=16g \
-  --ulimit memlock=-1 --ulimit stack=67108864 \
-  -it slimerl/slime:latest /bin/bash
 ```
 
 ### Code Quality
@@ -82,22 +68,8 @@ pytest --verbose --durations=0
 ```
 
 ### Model Weight Conversion
-```bash
-# HF → Megatron (torch_dist format)
-# First source the model config
-source scripts/models/glm4-9B.sh
 
-PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
-    ${MODEL_ARGS[@]} \
-    --hf-checkpoint /path/to/hf/model \
-    --save /path/to/output/torch_dist
-
-# Megatron → HF
-PYTHONPATH=/root/Megatron-LM python tools/convert_torch_dist_to_hf.py \
-  --input-dir /path/to/torch_dist_ckpt/iter_xxx/ \
-  --output-dir /path/to/output/hf \
-  --origin-hf-dir /path/to/original/hf
-```
+See `tools/convert_hf_to_torch_dist.py` (HF → Megatron) and `tools/convert_torch_dist_to_hf.py` (Megatron → HF). Requires sourcing model config first: `source scripts/models/<model>.sh`
 
 ### Running Training
 ```bash
@@ -245,13 +217,6 @@ Download FP8 model variant (e.g., `Qwen/Qwen3-4B-FP8`) and set:
 --hf-checkpoint /path/to/Qwen3-4B-FP8
 --ref-load /path/to/bf16_torch_dist  # Still use bf16 for training
 ```
-
-### Advantage Estimators
-- GRPO (default): `--advantage-estimator grpo`
-- GSPO: `--advantage-estimator gspo`
-- CISPO: `--advantage-estimator cispo`
-- Reinforce++: `--advantage-estimator reinforce++`
-- PPO: `--advantage-estimator ppo`
 
 ## Entry Points
 
