@@ -135,6 +135,12 @@ python examples/tool_calling/benchmarks/reasoning_length.py -n 30      # 30회 �
 | **Acc** | Tool calling 순서 정확도 (price_req → calc_req) |
 | **Parallel** | 병렬 tool call 지원 여부 |
 
+### 표 정렬 규칙
+- **모델명**: 알파벳순 (glm → gpt-oss → nemotron → qwen)
+- **태그 순서**:
+  - thinking: `think-off` → `think-turn` → `think-all`
+  - reasoning effort: `low` → `medium` → `high`
+
 ---
 
 ## 모델별 API 설정
