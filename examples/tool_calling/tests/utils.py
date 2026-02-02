@@ -1,6 +1,9 @@
 """Shared test utilities for tool calling tests."""
 
+import json
 from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -13,16 +16,23 @@ pytest.importorskip("transformers")
 
 
 def get_tokenizer(tokenizer_id: str):
-    """Load tokenizer, skip test if not available."""
+    """Load tokenizer, fail test if not available.
+
+    Note: Prefer using get_tokenizer_for_parser() from conftest.py which
+    provides caching and maps parser names to HF model IDs.
+    """
     from transformers import AutoTokenizer
 
     try:
         return AutoTokenizer.from_pretrained(tokenizer_id, trust_remote_code=True)
     except Exception as e:
-        pytest.skip(f"Could not load tokenizer {tokenizer_id}: {e}")
+        pytest.fail(
+            f"Could not load tokenizer {tokenizer_id}: {e}\n"
+            f"Try: huggingface-cli download {tokenizer_id}"
+        )
 
 
-def create_mock_tool_functions() -> dict[str, callable]:
+def create_mock_tool_functions():
     """Create mock tool implementations."""
 
     def get_weather(city: str) -> dict:
@@ -153,5 +163,88 @@ SEARCH_TOOL = {
         },
     },
 }
+
+
+# ============================================================================
+# Debug Helpers
+# ============================================================================
+
+
+def format_diff(expected: str, actual: str, context_chars: int = 50) -> str:
+    """Show exact character differences with positions.
+
+    Args:
+        expected: Expected string
+        actual: Actual string
+        context_chars: Characters of context to show around diff
+
+    Returns:
+        Human-readable diff with position markers
+    """
+    if expected == actual:
+        return "Strings are identical"
+
+    # Find first difference
+    for i, (e, a) in enumerate(zip(expected, actual)):
+        if e != a:
+            start = max(0, i - context_chars)
+            end_exp = min(len(expected), i + context_chars)
+            end_act = min(len(actual), i + context_chars)
+
+            return (
+                f"First difference at position {i}:\n"
+                f"  Expected char: {repr(e)} (ord={ord(e)})\n"
+                f"  Actual char:   {repr(a)} (ord={ord(a)})\n"
+                f"  Expected context: ...{repr(expected[start:end_exp])}...\n"
+                f"  Actual context:   ...{repr(actual[start:end_act])}..."
+            )
+
+    # Length difference
+    if len(expected) != len(actual):
+        return (
+            f"Length mismatch: expected {len(expected)}, got {len(actual)}\n"
+            f"  Expected ends with: {repr(expected[-context_chars:])}\n"
+            f"  Actual ends with:   {repr(actual[-context_chars:])}"
+        )
+
+    return "Unknown difference"
+
+
+def save_debug_info(
+    parser_name: str,
+    test_name: str,
+    data: dict,
+    output_dir: Path | None = None,
+) -> Path:
+    """Save full context to JSON for debugging failed tests.
+
+    Args:
+        parser_name: Name of the parser being tested
+        test_name: Name of the test that failed
+        data: Debug data to save (expected, actual, tokens, etc.)
+        output_dir: Directory to save to (default: tests/outputs/debug/)
+
+    Returns:
+        Path to the saved debug file
+    """
+    if output_dir is None:
+        output_dir = Path(__file__).parent / "outputs" / "debug"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{parser_name}_{test_name}_{timestamp}.json"
+    filepath = output_dir / filename
+
+    debug_data = {
+        "parser_name": parser_name,
+        "test_name": test_name,
+        "timestamp": datetime.now().isoformat(),
+        **data,
+    }
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(debug_data, f, indent=2, ensure_ascii=False, default=str)
+
+    return filepath
 
 
