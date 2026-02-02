@@ -315,11 +315,34 @@ def create_default_registry() -> ToolRegistry:
 # Each formatter matches SGLang's parser name exactly.
 
 
-def format_qwen(content: str, add_generation_prompt: bool = False, **ctx) -> str:
-    """Qwen 2.5 / Qwen 3 / Qwen3-Coder / MIMO / Hermes format.
+def format_qwen(content: str, add_generation_prompt: bool = False, enable_thinking: bool = False, **ctx) -> str:
+    """Qwen 2.5 / Qwen 3 / MIMO format.
 
     Full format with chat template markers:
     <|im_start|>user
+    <tool_response>
+    {content}
+    </tool_response><|im_end|>
+    <|im_start|>assistant
+    <think>  (if enable_thinking=True and add_generation_prompt=True)
+
+    Args:
+        content: Tool result content
+        add_generation_prompt: If True, append assistant start token for continuation
+        enable_thinking: If True, append <think> tag for Thinking models
+    """
+    base = f"<|im_start|>user\n<tool_response>\n{content}\n</tool_response><|im_end|>\n"
+    if add_generation_prompt:
+        if enable_thinking:
+            return base + "<|im_start|>assistant\n<think>\n"
+        return base + "<|im_start|>assistant\n"
+    return base
+
+
+def format_qwen3_coder(content: str, add_generation_prompt: bool = False, enable_thinking: bool = False, **ctx) -> str:
+    """Qwen3-Coder format (tool response without user role wrapper).
+
+    Unlike Qwen 2.5/3, Qwen3-Coder continues directly from assistant turn:
     <tool_response>
     {content}
     </tool_response><|im_end|>
@@ -328,9 +351,12 @@ def format_qwen(content: str, add_generation_prompt: bool = False, **ctx) -> str
     Args:
         content: Tool result content
         add_generation_prompt: If True, append assistant start token for continuation
+        enable_thinking: If True, append <think> tag for Thinking models
     """
-    base = f"<|im_start|>user\n<tool_response>\n{content}\n</tool_response><|im_end|>\n"
+    base = f"<tool_response>\n{content}\n</tool_response><|im_end|>\n"
     if add_generation_prompt:
+        if enable_thinking:
+            return base + "<|im_start|>assistant\n<think>\n"
         return base + "<|im_start|>assistant\n"
     return base
 
@@ -371,8 +397,13 @@ def format_glm47(content: str, add_generation_prompt: bool = False, **ctx) -> st
 
 
 def format_deepseek_v3(content: str, **ctx) -> str:
-    """DeepSeek V3/V3.1 format (special token wrapper)."""
+    """DeepSeek V3 format (special token wrapper with plural markers)."""
     return f"<｜tool▁outputs▁begin｜><｜tool▁output▁begin｜>{content}<｜tool▁output▁end｜><｜tool▁outputs▁end｜>"
+
+
+def format_deepseek_v31(content: str, **ctx) -> str:
+    """DeepSeek V3.1 format (special token wrapper without plural markers)."""
+    return f"<｜tool▁output▁begin｜>{content}<｜tool▁output▁end｜>"
 
 
 def format_deepseek_v32(content: str, **ctx) -> str:
@@ -380,15 +411,24 @@ def format_deepseek_v32(content: str, **ctx) -> str:
     return f"\n\n<function_results>\n<result>{content}</result>\n</function_results>"
 
 
-def format_llama3(content: str, **ctx) -> str:
-    """Llama 3.x ipython format.
+def format_llama3(content: str, add_generation_prompt: bool = False, **ctx) -> str:
+    """Llama 3.x / Llama 4 ipython format.
 
     The ipython role is used for tool call outputs.
     Content is JSON-encoded to handle special characters properly.
+
+    Format (Llama 4 Scout):
+        <|header_start|>ipython<|header_end|>
+
+        "{content}"<|eot|>
+        <|header_start|>assistant<|header_end|>  (if add_generation_prompt=True)
     """
-    # JSON-encode content to handle quotes, backslashes, etc.
+    # JSON-encode content as a string value
     encoded_content = json.dumps(content)
-    return f'\n<|start_header_id|>ipython<|end_header_id|>\n\n{{"output": {encoded_content}}}<|eot_id|>\n'
+    base = f'<|header_start|>ipython<|header_end|>\n\n{encoded_content}<|eot|>'
+    if add_generation_prompt:
+        return base + "<|header_start|>assistant<|header_end|>\n\n"
+    return base
 
 
 def format_mistral(content: str, tool_call_id: str = "", **ctx) -> str:
@@ -445,19 +485,80 @@ def format_minimax(content: str, **ctx) -> str:
     return f"]~b]tool\n<response>{content}</response>[e~[\n"
 
 
+def format_step3(content: str, add_generation_prompt: bool = False, **ctx) -> str:
+    """Step-3.5 format (uses tool_response role with <tool_response> wrapper).
+
+    Full format:
+    <|im_start|>tool_response
+    <tool_response>{content}</tool_response><|im_end|>
+    <|im_start|>assistant
+    <think>
+    """
+    base = f"<|im_start|>tool_response\n<tool_response>{content}</tool_response><|im_end|>\n"
+    if add_generation_prompt:
+        return base + "<|im_start|>assistant\n<think>\n"
+    return base
+
+
+def format_trinity(content: str, add_generation_prompt: bool = False, enable_thinking: bool = True, **ctx) -> str:
+    """Trinity format (uses user role with <tool_response> wrapper).
+
+    Note: Trinity places tool responses in the USER role, not tool role.
+    Trinity is a Thinking model so enable_thinking defaults to True.
+    """
+    base = f"<|im_start|>user\n<tool_response>\n{content}\n</tool_response><|im_end|>\n"
+    if add_generation_prompt:
+        if enable_thinking:
+            return base + "<|im_start|>assistant\n<think>\n"
+        return base + "<|im_start|>assistant\n"
+    return base
+
+
+def format_interns1(content: str, add_generation_prompt: bool = False, **ctx) -> str:
+    """InternLM/Intern-S1 format (uses environment role with plugin attribute).
+
+    Full format:
+    <|im_start|>environment name=<|plugin|>
+
+    {content}<|im_end|>
+    <|im_start|>assistant
+    <think>
+    """
+    base = f"<|im_start|>environment name=<|plugin|>\n\n{content}<|im_end|>\n"
+    if add_generation_prompt:
+        return base + "<|im_start|>assistant\n<think>"
+    return base
+
+
+def format_pythonic(content: str, add_generation_prompt: bool = False, **ctx) -> str:
+    """Pythonic/DeepHermes-3 format (uses tool role with <tool_response> wrapper).
+
+    Full format:
+    <|im_start|>tool
+    <tool_response>
+    {content}
+    </tool_response><|im_end|><|im_start|>assistant
+    (Note: no newline between <|im_end|> and <|im_start|>)
+    """
+    base = f"<|im_start|>tool\n<tool_response>\n{content}\n</tool_response><|im_end|>"
+    if add_generation_prompt:
+        return base + "<|im_start|>assistant\n"
+    return base
+
+
 # Registry: SGLang parser name -> formatter function
 TOOL_RESPONSE_FORMATTERS: Dict[str, Callable[..., str]] = {
     # Qwen family
     "qwen": format_qwen,
     "qwen25": format_qwen,
-    "qwen3_coder": format_qwen,
+    "qwen3_coder": format_qwen3_coder,  # Different format (no user role wrapper)
     # GLM family
     "glm": format_glm,
     "glm45": format_glm,
     "glm47": format_glm47,
     # DeepSeek family
     "deepseekv3": format_deepseek_v3,
-    "deepseekv31": format_deepseek_v3,  # V3.1 uses same format as V3
+    "deepseekv31": format_deepseek_v31,  # V3.1 uses different format (no plural markers)
     "deepseekv32": format_deepseek_v32,  # V3.2 uses DSML format
     # Complex formats
     "gpt-oss": format_gpt_oss,
@@ -466,8 +567,16 @@ TOOL_RESPONSE_FORMATTERS: Dict[str, Callable[..., str]] = {
     # Others
     "mimo": format_qwen,
     "llama3": format_llama3,
+    "llama4": format_pythonic,  # Llama 4 uses pythonic tool format
     "mistral": format_mistral,
-    "hermes": format_qwen,
+    # NEW parsers
+    "step3": format_step3,
+    "trinity": format_trinity,
+    "interns1": format_interns1,
+    "pythonic": format_pythonic,
+    "nano_v3": format_qwen,  # NVIDIA Nemotron uses Qwen3-style tags
+    # Keep hermes as alias (same as pythonic)
+    "hermes": format_pythonic,
 }
 
 
@@ -489,6 +598,9 @@ def format_observation(
         parser_name: Parser/formatter name (e.g., 'qwen25', 'glm47')
         add_generation_prompt: If True, include assistant start token for continuation.
             Set to False for parallel tool calls (except the last one).
+
+    Note: For multiple parallel tool calls, use format_observations_batch() instead
+    to ensure all tool responses are in a single message block as per the chat template.
     """
     if parser_name not in TOOL_RESPONSE_FORMATTERS:
         available = ", ".join(sorted(TOOL_RESPONSE_FORMATTERS.keys()))
@@ -504,3 +616,253 @@ def format_observation(
         tool_call_id=result.call_id or "",
         add_generation_prompt=add_generation_prompt,
     )
+
+
+def format_observations_batch(
+    results: List[ToolResult], parser_name: str, add_generation_prompt: bool = True
+) -> str:
+    """Format multiple tool results as a single observation block.
+
+    For parallel tool calls, this function formats all tool responses in a single
+    message block as expected by the chat template. This is the correct way to
+    handle multiple tool responses from a single assistant turn.
+
+    Args:
+        results: List of tool execution results
+        parser_name: Parser/formatter name (e.g., 'qwen25', 'glm47')
+        add_generation_prompt: If True, include assistant start token at the end
+
+    Returns:
+        Formatted observation string with all tool responses in one block
+
+    Example (Qwen format):
+        <|im_start|>user
+        <tool_response>
+        {result1}
+        </tool_response>
+        <tool_response>
+        {result2}
+        </tool_response><|im_end|>
+        <|im_start|>assistant
+    """
+    if not results:
+        return ""
+
+    if len(results) == 1:
+        return format_observation(results[0], parser_name, add_generation_prompt)
+
+    # Get the format pattern for this parser
+    if parser_name not in TOOL_RESPONSE_FORMATTERS:
+        available = ", ".join(sorted(TOOL_RESPONSE_FORMATTERS.keys()))
+        raise ValueError(f"Unsupported parser: '{parser_name}'. Available parsers: {available}")
+
+    # Handle parsers that need special batch formatting
+    # Qwen family: wrap all <tool_response> blocks in a single user message
+    if parser_name in {"qwen", "qwen25", "mimo", "nano_v3", "hermes", "pythonic"}:
+        return _format_qwen_batch(results, add_generation_prompt)
+
+    # For other parsers, concatenate individual responses
+    # (some models may handle parallel tool calls differently)
+    formatted_parts = []
+    for i, result in enumerate(results):
+        is_last = i == len(results) - 1
+        formatted_parts.append(
+            format_observation(result, parser_name, add_generation_prompt=is_last and add_generation_prompt)
+        )
+    return "".join(formatted_parts)
+
+
+def _format_qwen_batch(results: List[ToolResult], add_generation_prompt: bool) -> str:
+    """Format multiple tool results in Qwen-style single user message block."""
+    # Build all tool_response blocks
+    tool_response_blocks = []
+    for result in results:
+        if result.ok:
+            content = result.output
+        else:
+            content = f"Error ({result.error_type}): {result.error_message}"
+        tool_response_blocks.append(f"<tool_response>\n{content}\n</tool_response>")
+
+    # Join all blocks with newline
+    combined_responses = "\n".join(tool_response_blocks)
+
+    # Wrap in single user message
+    base = f"<|im_start|>user\n{combined_responses}<|im_end|>\n"
+    if add_generation_prompt:
+        return base + "<|im_start|>assistant\n"
+    return base
+
+
+# ============================================================================
+# Tokenizer-based Tool Response Formatter (SGLang-compatible)
+# ============================================================================
+
+
+class ToolResponseFormatter:
+    """Format tool responses using the tokenizer's chat template.
+
+    This class uses the tokenizer's `apply_chat_template` to ensure tool responses
+    are formatted exactly as the model expects. This is the preferred method as it
+    uses the official format from the model's chat template.
+
+    Usage:
+        formatter = ToolResponseFormatter(tokenizer)
+        observation = formatter.format(
+            content="4",
+            tool_call_id="call_0",
+            add_generation_prompt=True
+        )
+    """
+
+    # Cache for extracted format patterns
+    _format_cache: Dict[int, Dict[str, str]] = {}
+
+    def __init__(self, tokenizer):
+        """Initialize with a tokenizer.
+
+        Args:
+            tokenizer: HuggingFace tokenizer with apply_chat_template support
+        """
+        self.tokenizer = tokenizer
+        self._extract_format_pattern()
+
+    def _extract_format_pattern(self) -> None:
+        """Extract the tool response format pattern from the tokenizer's chat template."""
+        tokenizer_id = id(self.tokenizer)
+
+        if tokenizer_id in self._format_cache:
+            self._prefix = self._format_cache[tokenizer_id]["prefix"]
+            self._suffix_no_gen = self._format_cache[tokenizer_id]["suffix_no_gen"]
+            self._suffix_gen = self._format_cache[tokenizer_id]["suffix_gen"]
+            return
+
+        # Build minimal message context
+        messages_before = [
+            {"role": "user", "content": "__USER__"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "__CALL_ID__",
+                        "type": "function",
+                        "function": {"name": "__TOOL__", "arguments": "{}"},
+                    }
+                ],
+            },
+        ]
+
+        # Placeholder content for extraction
+        placeholder = "__CONTENT_PLACEHOLDER__"
+        messages_with_tool = messages_before + [
+            {"role": "tool", "tool_call_id": "__CALL_ID__", "content": placeholder}
+        ]
+
+        try:
+            text_before = self.tokenizer.apply_chat_template(
+                messages_before, tokenize=False, add_generation_prompt=False
+            )
+            text_no_gen = self.tokenizer.apply_chat_template(
+                messages_with_tool, tokenize=False, add_generation_prompt=False
+            )
+            text_gen = self.tokenizer.apply_chat_template(
+                messages_with_tool, tokenize=False, add_generation_prompt=True
+            )
+
+            # Extract observation portions
+            obs_no_gen = text_no_gen[len(text_before) :]
+            obs_gen = text_gen[len(text_before) :]
+
+            # Split by placeholder to get prefix/suffix
+            if placeholder in obs_no_gen:
+                parts = obs_no_gen.split(placeholder)
+                self._prefix = parts[0]
+                self._suffix_no_gen = parts[1] if len(parts) > 1 else ""
+            else:
+                # Fallback if placeholder not found
+                self._prefix = ""
+                self._suffix_no_gen = obs_no_gen
+
+            if placeholder in obs_gen:
+                parts = obs_gen.split(placeholder)
+                self._suffix_gen = parts[1] if len(parts) > 1 else ""
+            else:
+                self._suffix_gen = obs_gen[len(self._prefix) :] if self._prefix else obs_gen
+
+            # Cache for reuse
+            self._format_cache[tokenizer_id] = {
+                "prefix": self._prefix,
+                "suffix_no_gen": self._suffix_no_gen,
+                "suffix_gen": self._suffix_gen,
+            }
+
+        except Exception as e:
+            logger.warning(f"Failed to extract format from chat template: {e}. Using fallback.")
+            # Fallback to generic format
+            self._prefix = "<tool_response>\n"
+            self._suffix_no_gen = "\n</tool_response>\n"
+            self._suffix_gen = "\n</tool_response>\n<|assistant|>\n"
+
+    def format(
+        self,
+        content: str,
+        tool_call_id: str = "",
+        add_generation_prompt: bool = True,
+        **kwargs,
+    ) -> str:
+        """Format tool response content.
+
+        Args:
+            content: Tool execution result content
+            tool_call_id: ID of the tool call (not used in most formats, but kept for API compatibility)
+            add_generation_prompt: If True, include assistant start token
+
+        Returns:
+            Formatted tool response string
+        """
+        suffix = self._suffix_gen if add_generation_prompt else self._suffix_no_gen
+        return f"{self._prefix}{content}{suffix}"
+
+    def format_result(
+        self, result: ToolResult, add_generation_prompt: bool = True
+    ) -> str:
+        """Format a ToolResult object.
+
+        Args:
+            result: Tool execution result
+            add_generation_prompt: If True, include assistant start token
+
+        Returns:
+            Formatted tool response string
+        """
+        if result.ok:
+            content = result.output
+        else:
+            content = f"Error ({result.error_type}): {result.error_message}"
+        return self.format(
+            content=content,
+            tool_call_id=result.call_id or "",
+            add_generation_prompt=add_generation_prompt,
+        )
+
+
+def format_observation_from_tokenizer(
+    result: ToolResult,
+    tokenizer,
+    add_generation_prompt: bool = True,
+) -> str:
+    """Format tool result using the tokenizer's chat template.
+
+    This is the preferred method for formatting tool responses as it uses
+    the official format from the model's chat template.
+
+    Args:
+        result: Tool execution result
+        tokenizer: HuggingFace tokenizer with apply_chat_template support
+        add_generation_prompt: If True, include assistant start token
+
+    Returns:
+        Formatted observation string
+    """
+    formatter = ToolResponseFormatter(tokenizer)
+    return formatter.format_result(result, add_generation_prompt)

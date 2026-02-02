@@ -111,7 +111,7 @@ class TestTokenRoundtrip:
 class TestMultiHopAlignment:
     """Test alignment in multi-hop accumulated responses."""
 
-    @pytest.fixture(params=["qwen25", "deepseekv3", "glm47"])
+    @pytest.fixture(params=["qwen25", "deepseekv3", "glm47", "step3", "interns1"])
     def parser_name(self, request) -> str:
         return request.param
 

@@ -20,31 +20,44 @@ import pytest
 
 PARSER_TO_HF_MODEL: dict[str, str] = {
     # Qwen family
-    "qwen": "Qwen/Qwen2.5-0.5B-Instruct",
-    "qwen25": "Qwen/Qwen2.5-0.5B-Instruct",
-    "qwen3_coder": "Qwen/Qwen3-0.6B",
-    # GLM family (use Qwen fallback - GLM tokenizer not on HF Hub)
-    "glm": "Qwen/Qwen2.5-0.5B-Instruct",
-    "glm45": "Qwen/Qwen2.5-0.5B-Instruct",
-    "glm47": "Qwen/Qwen2.5-0.5B-Instruct",
+    "qwen": "Qwen/Qwen3-30B-A3B-Thinking-2507",
+    "qwen25": "Qwen/Qwen3-30B-A3B-Thinking-2507",
+    "qwen3_coder": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+    # GLM family
+    "glm": "zai-org/GLM-4.5",
+    "glm45": "zai-org/GLM-4.5",
+    "glm47": "zai-org/GLM-4.7-Flash",
     # DeepSeek family
     "deepseekv3": "deepseek-ai/DeepSeek-V3",
-    "deepseekv31": "deepseek-ai/DeepSeek-V3",
-    "deepseekv32": "deepseek-ai/DeepSeek-V3",
-    # Kimi
-    "kimi_k2": "moonshotai/Kimi-K2-Instruct",
-    # Mistral
-    "mistral": "mistralai/Mistral-7B-Instruct-v0.3",
-    # Llama
-    "llama3": "meta-llama/Llama-3.2-1B-Instruct",
-    # MiniMax (use Qwen fallback - MiniMax not on HF Hub)
-    "minimax-m2": "Qwen/Qwen2.5-0.5B-Instruct",
-    # GPT-OSS (use Qwen fallback)
-    "gpt-oss": "Qwen/Qwen2.5-0.5B-Instruct",
-    # MIMO (uses Qwen format)
-    "mimo": "Qwen/Qwen2.5-0.5B-Instruct",
-    # Hermes (uses Qwen format)
-    "hermes": "Qwen/Qwen2.5-0.5B-Instruct",
+    "deepseekv31": "deepseek-ai/DeepSeek-V3.1",
+    "deepseekv32": "deepseek-ai/DeepSeek-V3.1",  # V3.2 lacks chat_template, use V3.1
+    # Others (verified accessible)
+    "kimi_k2": "moonshotai/Kimi-K2-Thinking",
+    "mistral": "mistralai/Ministral-3-3B-Reasoning-2512",
+    "llama3": "meta-llama/Llama-4-Scout-17B-16E",
+    "llama4": "meta-llama/Llama-4-Scout-17B-16E",  # Llama 4 uses pythonic format
+    "minimax-m2": "MiniMaxAI/MiniMax-M2.1",
+    "gpt-oss": "openai/gpt-oss-20b",
+    "mimo": "XiaomiMiMo/MiMo-V2-Flash",
+    # NEW parsers
+    "step3": "stepfun-ai/Step-3.5-Flash",
+    "trinity": "arcee-ai/Trinity-Mini",
+    "pythonic": "NousResearch/DeepHermes-3-Llama-3-8B-Preview",
+    "interns1": "internlm/internlm3-8b-instruct",  # Intern-S1 has tokenizer bug
+    "nano_v3": "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16",
+    # Keep hermes as alias for backward compatibility
+    "hermes": "NousResearch/DeepHermes-3-Llama-3-8B-Preview",
+}
+
+# Parsers that use Thinking/Reasoning models (add <think> after assistant prompt)
+# These parsers require enable_thinking=True when formatting tool responses
+THINKING_PARSERS: set[str] = {
+    "qwen",      # Qwen3-30B-A3B-Thinking
+    "qwen25",    # Qwen3-30B-A3B-Thinking
+    "kimi_k2",   # Kimi-K2-Thinking
+    "trinity",   # Trinity-Mini (Thinking model)
+    "step3",     # Step-3.5-Flash (adds <think>)
+    "interns1",  # InternLM3 (adds <think>)
 }
 
 # Smaller/faster models for CI (use these by default in tests)

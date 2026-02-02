@@ -1380,7 +1380,7 @@ class TestErrorCases:
             format_kimi_k2("content")
 
     def test_json_content_escaping_in_llama3(self):
-        """Test that Llama3 formatter properly escapes special characters."""
+        """Test that Llama3/4 formatter properly escapes special characters."""
         from examples.tool_calling.tools import format_llama3
 
         # Content with special characters
@@ -1394,13 +1394,15 @@ class TestErrorCases:
         for content in test_cases:
             result = format_llama3(content)
 
-            # Extract JSON part and verify it's valid
-            json_start = result.find('{"output":')
-            json_end = result.find("}<|eot_id|>") + 1
+            # Format: <|header_start|>ipython<|header_end|>\n\n{json_encoded_content}<|eot|>
+            # Extract JSON string and verify it decodes to original content
+            json_start = result.find("\n\n") + 2
+            json_end = result.find("<|eot|>")
             json_part = result[json_start:json_end]
 
+            # The content is JSON-encoded as a string value
             parsed = json.loads(json_part)
-            assert parsed["output"] == content, f"Content not preserved for: {content}"
+            assert parsed == content, f"Content not preserved for: {content}"
 
     def test_empty_logprobs_raises_error(self):
         """Test that missing logprobs raises appropriate error."""

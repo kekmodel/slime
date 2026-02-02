@@ -72,6 +72,13 @@ markers = [
     "pleasefixme: marks tests that are broken and need fixing",
     "slow: marks tests that are slow (e.g., large model tokenizers) (deselect with '-m \"not slow\"')",
     "network: marks tests that require network access (e.g., API calls) (deselect with '-m \"not network\"')",
+    "sglang: marks tests that require SGLang server and full slime environment (deselect with '-m \"not sglang\"')",
+]
+# Filter external library deprecation warnings
+filterwarnings = [
+    "ignore::DeprecationWarning:importlib._bootstrap",  # SWIG tokenizer deprecation
+    "ignore::FutureWarning:transformers.modeling_rope_utils",  # rope_config_validation deprecation
+    "ignore:builtin type Swig.*has no __module__ attribute:DeprecationWarning",  # SWIG warnings
 ]
 
 [dependency-groups]

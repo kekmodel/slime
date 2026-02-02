@@ -32,7 +32,7 @@ from .tools import (
     ToolCall,
     ToolRegistry,
     create_default_registry,
-    format_observation,
+    format_observations_batch,
 )
 
 logger = logging.getLogger(__name__)
@@ -189,14 +189,26 @@ def _parse_arguments(args: Union[str, dict]) -> dict:
 
 
 def _generate_call_id(call, parser_name: str) -> str:
-    """Generate call_id based on model profile to match model's expected response format."""
+    """Generate call_id based on model profile to match model's expected response format.
+
+    For models that require matching call_id (kimi_k2, mistral), we first check if the
+    SGLang parser extracted the actual call_id from the model output. If available,
+    we use it directly. Otherwise, we fall back to generating one from the profile format.
+    """
     profile = get_model_profile(parser_name)
+
+    # For models requiring matching call_id, prefer the model-generated one if available
+    if profile.requires_matching_call_id:
+        actual_id = getattr(call, "call_id", None)
+        if actual_id:
+            return actual_id
+        logger.warning(
+            f"Parser '{parser_name}' requires matching call_id from model, but none provided. "
+            "Using fallback format. This may cause tool response mismatches."
+        )
+
     name = call.name or "unknown"
     index = getattr(call, "tool_index", 0)
-
-    if profile.requires_matching_call_id and not getattr(call, "call_id", None):
-        logger.warning(f"Parser '{parser_name}' requires matching call_id from model, but none provided. Using fallback format. This may cause tool response mismatches.")
-
     return profile.call_id_format.format(name=name, index=index)
 
 
@@ -375,27 +387,27 @@ async def generate(
         if config.stop_on_error and any(not r.ok for r in results):
             break
 
-        # Format observations and add to context
-        for i, result in enumerate(results):
-            observation = format_observation(result, parser_name)
-            observation_token_ids = state.tokenizer(observation, add_special_tokens=False)["input_ids"]
-            num_obs_tokens = len(observation_token_ids)
+        # Format all tool responses as a single observation block
+        # This ensures correct formatting for parallel tool calls per chat template
+        observation = format_observations_batch(results, parser_name, add_generation_prompt=True)
+        observation_token_ids = state.tokenizer(observation, add_special_tokens=False)["input_ids"]
+        num_obs_tokens = len(observation_token_ids)
 
-            # Accumulate observation (loss_mask = 0 for observations - not trained on)
-            all_response_text += observation
-            all_response_token_ids.extend(observation_token_ids)
-            all_log_probs.extend([0.0] * num_obs_tokens)  # Dummy logprobs for observations
-            all_loss_mask.extend([0] * num_obs_tokens)
+        # Accumulate observation (loss_mask = 0 for observations - not trained on)
+        all_response_text += observation
+        all_response_token_ids.extend(observation_token_ids)
+        all_log_probs.extend([0.0] * num_obs_tokens)  # Dummy logprobs for observations
+        all_loss_mask.extend([0] * num_obs_tokens)
 
-            # Update input for next hop
-            current_input_ids.extend(observation_token_ids)
+        # Update input for next hop
+        current_input_ids.extend(observation_token_ids)
 
-            # Invariant check after each observation
-            if not (len(all_response_token_ids) == len(all_loss_mask) == len(all_log_probs)):
-                logger.error(f"Hop {hop} obs {i}: length mismatch - tokens={len(all_response_token_ids)}, loss_mask={len(all_loss_mask)}, log_probs={len(all_log_probs)}")
-                sample.status = Sample.Status.FAILED
-                sample.metadata["tool_calling_error"] = f"Hop {hop} obs {i}: length mismatch"
-                break
+        # Invariant check after observation
+        if not (len(all_response_token_ids) == len(all_loss_mask) == len(all_log_probs)):
+            logger.error(f"Hop {hop} obs: length mismatch - tokens={len(all_response_token_ids)}, loss_mask={len(all_loss_mask)}, log_probs={len(all_log_probs)}")
+            sample.status = Sample.Status.FAILED
+            sample.metadata["tool_calling_error"] = f"Hop {hop} obs: length mismatch"
+            break
 
         # Check finish reason
         if finish_reason.get("type") == "length":
@@ -449,8 +461,8 @@ async def generate(
         sample.metadata["tool_calling_error"] = f"response_length/loss_mask length mismatch"
         return sample
 
-    # Set status if not already set (default is PENDING, not None)
-    if sample.status is None or sample.status == Sample.Status.PENDING:
+    # Set status if not already set (Sample initializes with PENDING by default)
+    if sample.status == Sample.Status.PENDING:
         if hop >= config.max_hops - 1:
             sample.status = Sample.Status.TRUNCATED
         else:

@@ -25,11 +25,12 @@ Key directories:
 
 ### Environment Setup
 ```bash
+# Create venv if it doesn't exist
+uv venv --python 3.12
+
+# Activate and install
 source .venv/bin/activate
 uv pip install -e .
-
-# If .venv doesn't exist
-uv venv --python 3.12
 ```
 
 ### Required Environment Variables
@@ -62,9 +63,13 @@ pytest
 pytest -m unit          # Unit tests only
 pytest -m integration   # Integration tests
 pytest -m system        # System tests
+pytest -m "not sglang"  # Skip SGLang integration tests (faster CI)
 
 # Run tests in a specific directory
 pytest tests/ci/
+
+# Run tool_calling tests
+pytest examples/tool_calling/tests/ -m "not sglang"
 
 # Run with verbose output and timing
 pytest --verbose --durations=0
@@ -205,6 +210,7 @@ Download FP8 model variant (e.g., `Qwen/Qwen3-4B-FP8`) and set:
 
 ### Common Issues
 
+- **Wrong Python interpreter**: If imports fail, ensure you're using `.venv/bin/python` explicitly, not system python
 - **OOM on second step (colocated mode)**: Reduce `--sglang-mem-fraction-static`
 - **Embedding conversion issues**: Manually set `--vocab-size` during torch_dist→HF conversion (Megatron pads embeddings)
 - **Precision issues with Transformer Engine**: Use `--attention-backend flash`
