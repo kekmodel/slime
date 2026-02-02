@@ -70,7 +70,7 @@ python examples/tool_calling/benchmarks/reasoning_length.py -n 30      # 30회 �
 
 ## 벤치마크 결과 (2026-02, 토큰 기준)
 
-### Single-Turn
+### 싱글턴 Tool Calling Benchmark (temperature=1.0, top_p=0.95, n=20)
 
 > 첫 응답만 측정. 프롬프트: "How much would it cost to buy an apple and a banana?"
 
@@ -90,7 +90,7 @@ python examples/tool_calling/benchmarks/reasoning_length.py -n 30      # 30회 �
 | qwen3-30b | 551 | 103~2285 | **89%** ❌ | 0 |
 | qwen3-next-80b | 1059 | 584~1804 | 33% ✅ | 2 |
 
-### Multi-Turn
+### 멀티턴 Tool Calling Benchmark (temperature=1.0, top_p=0.95, n=10)
 
 > 인사 → 가격 조회 도구(2개) → 계산 도구 → 최종 응답 시나리오 (병렬 tool calling 지원시 4턴, 미지원시 5턴)
 
