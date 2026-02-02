@@ -169,7 +169,7 @@ python examples/tool_calling/benchmarks/reasoning_length.py -n 30      # 30회 �
 
 ## 참고: nemotron3-nano 분석
 
-> Optional 모델로, 명시적 필터 필요 (`--filter nemotron`)
+> Optional 모델로, 기본 실행에서 제외됨. 테스트하려면 이름 지정 필요: `reasoning_length.py nemotron3-nano`
 
 ### 문제점
 1. **think-off 모드**: tool 사용 안 함 (~40% 확률로 직접 텍스트 응답)
