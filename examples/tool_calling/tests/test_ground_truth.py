@@ -29,9 +29,10 @@ from examples.tool_calling.tests.utils import (
 from examples.tool_calling.tools import TOOL_RESPONSE_FORMATTERS
 
 
-# Parsers that have real HF templates AND where our formatter matches exactly
-# qwen3_coder uses Qwen3 format which differs from Qwen2.5 - tested separately
-PARSERS_WITH_HF_TEMPLATES = ["qwen", "qwen25"]
+# Parsers that have real HF templates (not fallbacks to Qwen tokenizer)
+# Tests will FAIL if our formatter doesn't match HF template - that's intended!
+# Failures indicate the formatter needs fixing, not that the test should be skipped.
+PARSERS_WITH_HF_TEMPLATES = ["qwen", "qwen25", "qwen3_coder"]
 
 
 class TestToolResponseGroundTruth:

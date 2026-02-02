@@ -4,127 +4,157 @@ Tests the critical invariants for RL training:
 - len(token_ids) == len(loss_mask) == len(log_probs)
 - loss_mask = 1 for generated tokens, 0 for observations
 - Token round-trip: decode(encode(text)) preserves meaning
+
+Design:
+- NO pytest.skip() - use pytest.fail() with instructions
+- Parametrized across all parsers using conftest fixtures
+- Uses shared fixtures from conftest.py
 """
 
 import pytest
 
 pytest.importorskip("transformers")
 
+from examples.tool_calling.tests.conftest import (
+    PARSER_TO_HF_MODEL,
+    get_tokenizer_for_parser,
+)
 from examples.tool_calling.tests.utils import (
-    get_tokenizer,
     MockGenerateResponse,
     create_generate_response,
-    CALCULATOR_TOOL,
 )
+from examples.tool_calling.tools import TOOL_RESPONSE_FORMATTERS
 
 
-@pytest.mark.parametrize("parser_name", ["qwen25", "deepseekv3", "glm47"])
-def test_token_length_invariants(parser_name: str):
+class TestTokenLengthInvariants:
     """Test that token arrays maintain length invariants."""
-    tokenizer = get_tokenizer("Qwen/Qwen2.5-0.5B-Instruct")
 
-    # Simulate a simple generation
-    text = "The answer is 42."
-    token_ids = tokenizer.encode(text, add_special_tokens=False)
+    @pytest.fixture(params=list(PARSER_TO_HF_MODEL.keys()))
+    def parser_name(self, request) -> str:
+        return request.param
 
-    # Create mock response
-    response = create_generate_response(tokenizer, text)
-    output = response.to_dict()
+    def test_token_logprob_length_match(self, parser_name: str):
+        """INVARIANT: len(token_ids) == len(logprobs)"""
+        tokenizer = get_tokenizer_for_parser(parser_name)
 
-    # Extract logprobs
-    logprobs = output["meta_info"]["output_token_logprobs"]
+        text = "The answer is 42."
+        token_ids = tokenizer.encode(text, add_special_tokens=False)
 
-    # INVARIANT: len(token_ids) == len(logprobs)
-    assert len(token_ids) == len(logprobs), "Token/logprob length mismatch"
+        response = create_generate_response(tokenizer, text)
+        output = response.to_dict()
 
-    # INVARIANT: Each logprob entry has [logprob, token_id]
-    for entry in logprobs:
-        assert len(entry) >= 2, f"Invalid logprob entry: {entry}"
+        logprobs = output["meta_info"]["output_token_logprobs"]
 
+        assert len(token_ids) == len(logprobs), (
+            f"{parser_name}: Token/logprob length mismatch: " f"tokens={len(token_ids)}, logprobs={len(logprobs)}"
+        )
 
-def test_loss_mask_values():
-    """Test that loss_mask only contains 0 or 1."""
-    # Simulate generation + observation
-    gen_mask = [1, 1, 1, 1, 1]  # Generated tokens
-    obs_mask = [0, 0, 0]  # Observation tokens
+    def test_logprob_entry_format(self, parser_name: str):
+        """Each logprob entry must be [logprob, token_id]."""
+        tokenizer = get_tokenizer_for_parser(parser_name)
 
-    full_mask = gen_mask + obs_mask
+        text = "Testing format."
+        response = create_generate_response(tokenizer, text)
+        output = response.to_dict()
 
-    # INVARIANT: All values are 0 or 1
-    for i, val in enumerate(full_mask):
-        assert val in (0, 1), f"Invalid loss_mask value at {i}: {val}"
-
-
-def test_token_roundtrip():
-    """Test decode(encode(text)) preserves meaning."""
-    tokenizer = get_tokenizer("Qwen/Qwen2.5-0.5B-Instruct")
-
-    # Test observation text
-    from examples.tool_calling.tools import format_qwen
-
-    observation = format_qwen(content="42")
-
-    # Encode then decode
-    token_ids = tokenizer.encode(observation, add_special_tokens=False)
-    decoded = tokenizer.decode(token_ids, skip_special_tokens=False)
-
-    # Should be able to recover the original meaning
-    # Note: Exact match may not hold due to special tokens, but
-    # the content should be preserved
-    assert "42" in decoded, "Content lost in token roundtrip"
-    assert "tool_response" in decoded or " Tool " in decoded, "Format markers lost"
+        for i, entry in enumerate(output["meta_info"]["output_token_logprobs"]):
+            assert len(entry) >= 2, f"{parser_name}: Invalid logprob entry at {i}: {entry}"
 
 
-@pytest.mark.slow
-def test_accumulated_response_alignment():
-    """Test alignment in multi-hop accumulated responses.
+class TestLossMaskValues:
+    """Test that loss_mask only contains valid values."""
 
-    This simulates the full multi-hop flow and checks alignment
-    after each hop.
-    """
-    tokenizer = get_tokenizer("Qwen/Qwen2.5-0.5B-Instruct")
+    def test_loss_mask_binary(self):
+        """INVARIANT: All loss_mask values are 0 or 1."""
+        gen_mask = [1, 1, 1, 1, 1]  # Generated tokens
+        obs_mask = [0, 0, 0]  # Observation tokens
 
-    # Simulate multi-hop
-    all_tokens = []
-    all_log_probs = []
-    all_loss_mask = []
+        full_mask = gen_mask + obs_mask
 
-    # Hop 1: Generation
-    gen_text = "Let me calculate that."
-    gen_tokens = tokenizer.encode(gen_text, add_special_tokens=False)
-    gen_log_probs = [-0.5] * len(gen_tokens)
+        for i, val in enumerate(full_mask):
+            assert val in (0, 1), f"Invalid loss_mask value at {i}: {val}"
 
-    all_tokens.extend(gen_tokens)
-    all_log_probs.extend(gen_log_probs)
-    all_loss_mask.extend([1] * len(gen_tokens))  # Train on generation
 
-    # INVARIANT after generation
-    assert len(all_tokens) == len(all_log_probs) == len(all_loss_mask)
+class TestTokenRoundtrip:
+    """Test that token round-trips preserve content."""
 
-    # Hop 1: Observation
-    obs_text = "<tool_response>4</tool_response>"
-    obs_tokens = tokenizer.encode(obs_text, add_special_tokens=False)
-    obs_log_probs = [0.0] * len(obs_tokens)  # Dummy logprobs
+    @pytest.fixture(params=list(PARSER_TO_HF_MODEL.keys()))
+    def parser_name(self, request) -> str:
+        return request.param
 
-    all_tokens.extend(obs_tokens)
-    all_log_probs.extend(obs_log_probs)
-    all_loss_mask.extend([0] * len(obs_tokens))  # Don't train on observation
+    def test_observation_roundtrip(self, parser_name: str):
+        """decode(encode(observation)) preserves content."""
+        if parser_name not in TOOL_RESPONSE_FORMATTERS:
+            pytest.xfail(f"No formatter registered for {parser_name}")
 
-    # INVARIANT after observation
-    assert len(all_tokens) == len(all_log_probs) == len(all_loss_mask)
+        tokenizer = get_tokenizer_for_parser(parser_name)
+        formatter = TOOL_RESPONSE_FORMATTERS[parser_name]
 
-    # Hop 2: Generation
-    gen_text2 = "The result is 4."
-    gen_tokens2 = tokenizer.encode(gen_text2, add_special_tokens=False)
-    gen_log_probs2 = [-0.6] * len(gen_tokens2)
+        # Get observation
+        kwargs = {"content": "42"}
+        if parser_name in {"kimi_k2", "mistral"}:
+            kwargs["tool_call_id"] = "functions.test:0"
+        if parser_name == "gpt-oss":
+            kwargs["tool_name"] = "calculator"
 
-    all_tokens.extend(gen_tokens2)
-    all_log_probs.extend(gen_log_probs2)
-    all_loss_mask.extend([1] * len(gen_tokens2))
+        observation = formatter(**kwargs)
 
-    # FINAL INVARIANT
-    assert len(all_tokens) == len(all_log_probs) == len(all_loss_mask)
+        # Round-trip
+        token_ids = tokenizer.encode(observation, add_special_tokens=False)
+        decoded = tokenizer.decode(token_ids, skip_special_tokens=False)
 
-    # Verify loss_mask values
-    for i, val in enumerate(all_loss_mask):
-        assert val in (0, 1), f"Invalid mask at {i}: {val}"
+        assert "42" in decoded, (
+            f"{parser_name}: Content lost in round-trip. " f"Original: {observation[:100]}..., Decoded: {decoded[:100]}..."
+        )
+
+
+class TestMultiHopAlignment:
+    """Test alignment in multi-hop accumulated responses."""
+
+    @pytest.fixture(params=["qwen25", "deepseekv3", "glm47"])
+    def parser_name(self, request) -> str:
+        return request.param
+
+    @pytest.mark.slow
+    def test_accumulated_response_alignment(self, parser_name: str):
+        """Alignment must hold at every step of multi-hop flow."""
+        tokenizer = get_tokenizer_for_parser(parser_name)
+
+        all_tokens: list[int] = []
+        all_log_probs: list[float] = []
+        all_loss_mask: list[int] = []
+
+        # Hop 1: Generation
+        gen_text = "Let me calculate that."
+        gen_tokens = tokenizer.encode(gen_text, add_special_tokens=False)
+        all_tokens.extend(gen_tokens)
+        all_log_probs.extend([-0.5] * len(gen_tokens))
+        all_loss_mask.extend([1] * len(gen_tokens))
+
+        assert len(all_tokens) == len(all_log_probs) == len(all_loss_mask), (
+            f"Alignment broken after generation: "
+            f"tokens={len(all_tokens)}, logprobs={len(all_log_probs)}, mask={len(all_loss_mask)}"
+        )
+
+        # Hop 1: Observation
+        obs_text = "<tool_response>4</tool_response>"
+        obs_tokens = tokenizer.encode(obs_text, add_special_tokens=False)
+        all_tokens.extend(obs_tokens)
+        all_log_probs.extend([0.0] * len(obs_tokens))
+        all_loss_mask.extend([0] * len(obs_tokens))
+
+        assert len(all_tokens) == len(all_log_probs) == len(all_loss_mask), (
+            f"Alignment broken after observation: "
+            f"tokens={len(all_tokens)}, logprobs={len(all_log_probs)}, mask={len(all_loss_mask)}"
+        )
+
+        # Hop 2: Final generation
+        final_text = "The result is 4."
+        final_tokens = tokenizer.encode(final_text, add_special_tokens=False)
+        all_tokens.extend(final_tokens)
+        all_log_probs.extend([-0.6] * len(final_tokens))
+        all_loss_mask.extend([1] * len(final_tokens))
+
+        # Final check
+        assert len(all_tokens) == len(all_log_probs) == len(all_loss_mask)
+        assert all(m in (0, 1) for m in all_loss_mask)
