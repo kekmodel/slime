@@ -704,11 +704,11 @@ def print_comparison_table(results: list[dict], title: str = "Results"):
     is_multi = any(r.get("turn_stats") for r in results)
 
     if is_multi:
-        print(f"| {'Model':<22} | {'Reason':>8} | {'Content':>8} | {'Total':>8} | {'CV':>5} | {'Turns':>5} | {'Acc':>5} |")
-        print(f"|{'-' * 24}|{'-' * 10}|{'-' * 10}|{'-' * 10}|{'-' * 7}|{'-' * 7}|{'-' * 7}|")
+        print(f"| {'Model':<22} | {'Reason':>8} | {'R.Range':>11} | {'Content':>8} | {'CV':>5} | {'Turns':>5} | {'Acc':>5} |")
+        print(f"|{'-' * 24}|{'-' * 10}|{'-' * 13}|{'-' * 10}|{'-' * 7}|{'-' * 7}|{'-' * 7}|")
     else:
-        print(f"| {'Model':<22} | {'Reason':>8} | {'Content':>8} | {'Total':>8} | {'CV':>5} |")
-        print(f"|{'-' * 24}|{'-' * 10}|{'-' * 10}|{'-' * 10}|{'-' * 7}|")
+        print(f"| {'Model':<22} | {'Reason':>8} | {'R.Range':>11} | {'Content':>8} | {'CV':>5} |")
+        print(f"|{'-' * 24}|{'-' * 10}|{'-' * 13}|{'-' * 10}|{'-' * 7}|")
 
     # Sort by total average
     sorted_results = sorted(results, key=lambda x: x.get("total_stats", x["stats"])["avg"])
@@ -719,19 +719,22 @@ def print_comparison_table(results: list[dict], title: str = "Results"):
         total_stats = r.get("total_stats", r["stats"])
 
         cv_marker = "✅" if reasoning_stats["cv"] < 40 else ("⚠️" if reasoning_stats["cv"] < 60 else "❌")
+        r_min = int(reasoning_stats.get("min", 0))
+        r_max = int(reasoning_stats.get("max", 0))
+        r_range = f"{r_min}~{r_max}"
 
         if is_multi and r.get("turn_stats"):
             avg_turns = r["turn_stats"].get("avg", 0)
             accuracy = r.get("accuracy", 0)
             acc_marker = "✅" if accuracy >= 90 else ("⚠️" if accuracy >= 70 else "❌")
             print(
-                f"| {r['config']:<22} | {reasoning_stats['avg']:>8,.0f} | {content_stats['avg']:>8,.0f} | "
-                f"{total_stats['avg']:>8,.0f} | {reasoning_stats['cv']:>3.0f}% {cv_marker} | {avg_turns:>5.1f} | {accuracy:>3.0f}% {acc_marker} |"
+                f"| {r['config']:<22} | {reasoning_stats['avg']:>8,.0f} | {r_range:>11} | {content_stats['avg']:>8,.0f} | "
+                f"{reasoning_stats['cv']:>3.0f}% {cv_marker} | {avg_turns:>5.1f} | {accuracy:>3.0f}% {acc_marker} |"
             )
         else:
             print(
-                f"| {r['config']:<22} | {reasoning_stats['avg']:>8,.0f} | {content_stats['avg']:>8,.0f} | "
-                f"{total_stats['avg']:>8,.0f} | {reasoning_stats['cv']:>3.0f}% {cv_marker} |"
+                f"| {r['config']:<22} | {reasoning_stats['avg']:>8,.0f} | {r_range:>11} | {content_stats['avg']:>8,.0f} | "
+                f"{reasoning_stats['cv']:>3.0f}% {cv_marker} |"
             )
 
     print("=" * 80)
