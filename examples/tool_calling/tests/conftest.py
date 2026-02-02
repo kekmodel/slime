@@ -3,6 +3,7 @@ Pytest configuration for tool calling tests.
 
 Provides:
 - Result collection and saving with timestamp
+- PARSER_TO_HF_MODEL mapping for parser-to-model lookup
 """
 
 import datetime
@@ -11,6 +12,46 @@ from pathlib import Path
 from typing import Optional
 
 import pytest
+
+
+# ============================================================================
+# Parser to HuggingFace Model Mapping
+# ============================================================================
+
+PARSER_TO_HF_MODEL: dict[str, str] = {
+    # Qwen family
+    "qwen": "Qwen/Qwen2.5-0.5B-Instruct",
+    "qwen25": "Qwen/Qwen2.5-0.5B-Instruct",
+    "qwen3_coder": "Qwen/Qwen3-0.6B",
+    # GLM family (use Qwen fallback - GLM tokenizer not on HF Hub)
+    "glm": "Qwen/Qwen2.5-0.5B-Instruct",
+    "glm45": "Qwen/Qwen2.5-0.5B-Instruct",
+    "glm47": "Qwen/Qwen2.5-0.5B-Instruct",
+    # DeepSeek family
+    "deepseekv3": "deepseek-ai/DeepSeek-V3",
+    "deepseekv31": "deepseek-ai/DeepSeek-V3",
+    "deepseekv32": "deepseek-ai/DeepSeek-V3",
+    # Kimi
+    "kimi_k2": "moonshotai/Kimi-K2-Instruct",
+    # Mistral
+    "mistral": "mistralai/Mistral-7B-Instruct-v0.3",
+    # Llama
+    "llama3": "meta-llama/Llama-3.2-1B-Instruct",
+    # MiniMax (use Qwen fallback - MiniMax not on HF Hub)
+    "minimax-m2": "Qwen/Qwen2.5-0.5B-Instruct",
+    # GPT-OSS (use Qwen fallback)
+    "gpt-oss": "Qwen/Qwen2.5-0.5B-Instruct",
+    # MIMO (uses Qwen format)
+    "mimo": "Qwen/Qwen2.5-0.5B-Instruct",
+    # Hermes (uses Qwen format)
+    "hermes": "Qwen/Qwen2.5-0.5B-Instruct",
+}
+
+# Smaller/faster models for CI (use these by default in tests)
+PARSER_TO_HF_MODEL_SMALL: dict[str, str] = {
+    parser: "Qwen/Qwen2.5-0.5B-Instruct"  # All use small Qwen for speed
+    for parser in PARSER_TO_HF_MODEL
+}
 
 
 # ============================================================================
