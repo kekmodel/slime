@@ -110,17 +110,6 @@ python examples/tool_calling/benchmarks/reasoning_length.py -n 30      # 30회 �
 | qwen3-30b | 628 | 522~899 | 18% ✅ | 51 | 3.9 | 80% ⚠️ | ✅ |
 | qwen3-next-80b | 2545 | 1498~3559 | 23% ✅ | 63 | 3.9 | 80% ⚠️ | ✅ |
 
-### 모델별 Parallel 지원 (Turn 분포 기준)
-
-| model_id | Parallel | Turn 분포 | 비고 |
-|----------|----------|-----------|------|
-| **glm4.7-flash** | ✅ Yes | 4턴: 30회 (100%) | 완벽한 병렬 |
-| **gpt-oss-120b** | ❌ No | 5턴: 30회 (100%) | 완벽한 순차 |
-| **gpt-oss-20b** | ❌ No | 5턴: 29회, 2턴: 1회 | 순차 |
-| **nemotron3-nano** | ✅ Yes | 4턴 있음 | 병렬 but Acc 80~90%, CV 높음 |
-| **qwen3-30b** | ✅ Yes | 4턴: 7회, 3턴: 2회, 5턴: 1회 | 병렬 but Acc 80% |
-| **qwen3-next-80b** | ✅ Yes | 4턴: 5회, 5턴: 3회, 2턴: 2회 | 병렬 but Acc 80% |
-
 ---
 
 ## 컬럼 설명
@@ -140,6 +129,17 @@ python examples/tool_calling/benchmarks/reasoning_length.py -n 30      # 30회 �
 - **태그 순서**:
   - thinking: `think-off` → `think-turn` → `think-all`
   - reasoning effort: `low` → `medium` → `high`
+
+### 모델별 Parallel Tool Calling 지원 (Turn 분포 기준)
+
+| model_id | Parallel | Turn 분포 | 비고 |
+|----------|----------|-----------|------|
+| **glm4.7-flash** | ✅ Yes | 4턴: 30회 (100%) | 완벽한 병렬 |
+| **gpt-oss-120b** | ❌ No | 5턴: 30회 (100%) | 완벽한 순차 |
+| **gpt-oss-20b** | ❌ No | 5턴: 29회, 2턴: 1회 | 순차 |
+| **nemotron3-nano** | ✅ Yes | 4턴 있음 | 병렬 but Acc 80~90%, CV 높음 |
+| **qwen3-30b** | ✅ Yes | 4턴: 7회, 3턴: 2회, 5턴: 1회 | 병렬 but Acc 80% |
+| **qwen3-next-80b** | ✅ Yes | 4턴: 5회, 5턴: 3회, 2턴: 2회 | 병렬 but Acc 80% |
 
 ---
 
