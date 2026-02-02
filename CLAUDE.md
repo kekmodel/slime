@@ -33,8 +33,8 @@ uv venv --python 3.12
 ```
 
 ### Required Environment Variables
-- `PYTHONPATH=/path/to/Megatron-LM` - Megatron 학습 시 필수
-- `OPENROUTER_API_KEY` - examples/tool_calling 벤치마크 시
+- `PYTHONPATH=/path/to/Megatron-LM` - Required for Megatron training
+- `OPENROUTER_API_KEY` - For examples/tool_calling benchmarks
 
 ### Code Quality
 ```bash
@@ -205,7 +205,7 @@ Download FP8 model variant (e.g., `Qwen/Qwen3-4B-FP8`) and set:
 
 ## Entry Points
 
-- `train.py` - 동기 학습 (기본)
-- `train_async.py` - 비동기 학습 (실험적)
-- `slime/utils/arguments.py` - 모든 argument 정의 (참조용)
+- `train.py` - Synchronous training (default)
+- `train_async.py` - Asynchronous training (experimental)
+- `slime/utils/arguments.py` - All argument definitions (reference)
 
