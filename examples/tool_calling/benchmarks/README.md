@@ -77,18 +77,18 @@ python examples/tool_calling/benchmarks/reasoning_length.py -n 30      # 30회 �
 | Model | R.Avg | R.Range | R.CV | C.Avg |
 |-------|-------|---------|------|-------|
 | glm4.7-flash:think-off | **0** | 0~0 | 0% ✅ | 22 |
-| nemotron3-nano:think-off | **0** | 0~0 | 0% ✅ | 47 |
-| gpt-oss-120b:low | 12 | 6~14 | 18% ✅ | 0 |
-| gpt-oss-20b:low | 13 | 7~22 | 27% ✅ | 0 |
-| gpt-oss-120b:medium | 59 | 21~97 | 33% ✅ | 0 |
-| gpt-oss-20b:medium | 60 | 11~372 | **125%** ❌ | 0 |
-| glm4.7-flash:think-all | 65 | 31~107 | 30% ✅ | 20 |
 | glm4.7-flash:think-turn | 80 | 47~137 | 33% ✅ | 22 |
+| glm4.7-flash:think-all | 65 | 31~107 | 30% ✅ | 20 |
+| gpt-oss-120b:low | 12 | 6~14 | 18% ✅ | 0 |
+| gpt-oss-120b:medium | 59 | 21~97 | 33% ✅ | 0 |
 | gpt-oss-120b:high | 243 | 119~569 | 49% ⚠️ | 0 |
+| gpt-oss-20b:low | 13 | 7~22 | 27% ✅ | 0 |
+| gpt-oss-20b:medium | 60 | 11~372 | **125%** ❌ | 0 |
+| gpt-oss-20b:high | 1610 | 183~10438 | **140%** ❌ | 0 |
+| nemotron3-nano:think-off | **0** | 0~0 | 0% ✅ | 47 |
+| nemotron3-nano | **4920** | 180~**54992** | **249%** ❌ | 9 |
 | qwen3-30b | 551 | 103~2285 | **89%** ❌ | 0 |
 | qwen3-next-80b | 1059 | 584~1804 | 33% ✅ | 2 |
-| gpt-oss-20b:high | 1610 | 183~10438 | **140%** ❌ | 0 |
-| nemotron3-nano | **4920** | 180~**54992** | **249%** ❌ | 9 |
 
 ### Multi-Turn
 
@@ -97,17 +97,17 @@ python examples/tool_calling/benchmarks/reasoning_length.py -n 30      # 30회 �
 | Model | R.Avg | R.Range | R.CV | C.Avg | Turns | Acc | Parallel |
 |-------|-------|---------|------|-------|-------|-----|----------|
 | glm4.7-flash:think-off | **0** | 0~0 | 0% ✅ | 78 | 4.0 | 100% ✅ | ✅ |
-| nemotron3-nano:think-off | **0** | 0~0 | 0% ✅ | 61 | 4.1 | 80% ⚠️ | ✅ |
-| gpt-oss-20b:low | 41 | 34~52 | 14% ✅ | 25 | 5.0 | 100% ✅ | ❌ |
-| gpt-oss-120b:low | 47 | 34~60 | 21% ✅ | 30 | 5.0 | 100% ✅ | ❌ |
-| gpt-oss-20b:medium | 164 | 77~280 | 37% ✅ | 31 | 4.7 | 90% ⚠️ | ❌ |
-| gpt-oss-120b:medium | 187 | 137~229 | 13% ✅ | 44 | 5.0 | 100% ✅ | ❌ |
-| glm4.7-flash:think-all | 463 | 308~615 | 21% ✅ | 80 | 4.0 | 100% ✅ | ✅ |
 | glm4.7-flash:think-turn | 489 | 281~579 | 20% ✅ | 88 | 4.0 | 100% ✅ | ✅ |
-| qwen3-30b | 628 | 522~899 | 18% ✅ | 51 | 3.9 | 80% ⚠️ | ✅ |
+| glm4.7-flash:think-all | 463 | 308~615 | 21% ✅ | 80 | 4.0 | 100% ✅ | ✅ |
+| gpt-oss-120b:low | 47 | 34~60 | 21% ✅ | 30 | 5.0 | 100% ✅ | ❌ |
+| gpt-oss-120b:medium | 187 | 137~229 | 13% ✅ | 44 | 5.0 | 100% ✅ | ❌ |
 | gpt-oss-120b:high | 647 | 471~869 | 22% ✅ | 56 | 5.0 | 100% ✅ | ❌ |
-| nemotron3-nano | 1396 | 399~3202 | 59% ⚠️ | 61 | 4.6 | 90% ⚠️ | ✅ |
+| gpt-oss-20b:low | 41 | 34~52 | 14% ✅ | 25 | 5.0 | 100% ✅ | ❌ |
+| gpt-oss-20b:medium | 164 | 77~280 | 37% ✅ | 31 | 4.7 | 90% ⚠️ | ❌ |
 | gpt-oss-20b:high | 1398 | 379~2414 | 45% ⚠️ | 43 | 5.0 | 100% ✅ | ❌ |
+| nemotron3-nano:think-off | **0** | 0~0 | 0% ✅ | 61 | 4.1 | 80% ⚠️ | ✅ |
+| nemotron3-nano | 1396 | 399~3202 | 59% ⚠️ | 61 | 4.6 | 90% ⚠️ | ✅ |
+| qwen3-30b | 628 | 522~899 | 18% ✅ | 51 | 3.9 | 80% ⚠️ | ✅ |
 | qwen3-next-80b | 2545 | 1498~3559 | 23% ✅ | 63 | 3.9 | 80% ⚠️ | ✅ |
 
 ### 모델별 Parallel 지원 (Turn 분포 기준)
@@ -117,9 +117,9 @@ python examples/tool_calling/benchmarks/reasoning_length.py -n 30      # 30회 �
 | **glm4.7-flash** | ✅ Yes | 4턴: 30회 (100%) | 완벽한 병렬 |
 | **gpt-oss-120b** | ❌ No | 5턴: 30회 (100%) | 완벽한 순차 |
 | **gpt-oss-20b** | ❌ No | 5턴: 29회, 2턴: 1회 | 순차 |
+| **nemotron3-nano** | ✅ Yes | 4턴 있음 | 병렬 but Acc 80~90%, CV 높음 |
 | **qwen3-30b** | ✅ Yes | 4턴: 7회, 3턴: 2회, 5턴: 1회 | 병렬 but Acc 80% |
 | **qwen3-next-80b** | ✅ Yes | 4턴: 5회, 5턴: 3회, 2턴: 2회 | 병렬 but Acc 80% |
-| **nemotron3-nano** | ✅ Yes | 4턴 있음 | 병렬 but Acc 80~90%, CV 높음 |
 
 ---
 
