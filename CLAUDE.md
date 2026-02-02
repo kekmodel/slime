@@ -73,22 +73,10 @@ See `tools/convert_hf_to_torch_dist.py` (HF → Megatron) and `tools/convert_tor
 
 ### Running Training
 ```bash
-# Single-node training example
-cd /root/slime
+# Single-node
 bash scripts/run-glm4-9B.sh
 
-# Multi-node: Start Ray cluster first
-# On head node:
-ray start --head --node-ip-address ${MASTER_ADDR} \
-  --num-gpus 8 --disable-usage-stats
-
-# On worker nodes:
-ray start --address=${MASTER_ADDR}:6379 --num-gpus 8
-
-# Submit job from head node:
-ray job submit --address="http://127.0.0.1:8265" \
-   --runtime-env-json='{"env_vars": {"PYTHONPATH": "/root/Megatron-LM/"}}' \
-   -- python3 train.py [args...]
+# Multi-node: See scripts/ for Ray cluster setup examples
 ```
 
 ## Architecture Concepts
@@ -113,13 +101,9 @@ The rollout-training loop must satisfy:
 - `--global-batch-size`: Samples for one optimizer.step()
 - `--num-steps-per-rollout`: Parameter updates per sampled data batch (default: 1 for on-policy)
 
-### Parallelism Strategies (Megatron)
+### Parallelism (Megatron)
 
-- **TP** (`--tensor-model-parallel-size`): Tensor parallelism. Always enable `--sequence-parallel` when using TP
-- **PP** (`--pipeline-model-parallel-size`): Pipeline parallelism
-- **CP** (`--context-parallel-size`): Context parallelism (ring attention)
-- **EP** (`--expert-model-parallel-size`): Expert parallelism for MoE
-- **ETP** (`--expert-tensor-parallel-size`): Separate TP for MoE experts
+Supports TP, PP, CP, EP, ETP. **Gotcha**: Always enable `--sequence-parallel` when using `--tensor-model-parallel-size`.
 
 ### Colocated vs Disaggregated Mode
 
