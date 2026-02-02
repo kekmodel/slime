@@ -55,6 +55,74 @@ PARSER_TO_HF_MODEL_SMALL: dict[str, str] = {
 
 
 # ============================================================================
+# Tokenizer Helpers
+# ============================================================================
+
+_tokenizer_cache: dict[str, object] = {}
+
+
+def get_tokenizer_for_parser(parser_name: str, use_small: bool = True):
+    """Get tokenizer for a parser, with caching.
+
+    Args:
+        parser_name: Name of the parser (e.g., "qwen25", "glm47")
+        use_small: If True, use smaller models for faster tests
+
+    Returns:
+        AutoTokenizer instance
+
+    Raises:
+        pytest.fail: If tokenizer cannot be loaded (with download instructions)
+    """
+    from transformers import AutoTokenizer
+
+    mapping = PARSER_TO_HF_MODEL_SMALL if use_small else PARSER_TO_HF_MODEL
+    model_id = mapping.get(parser_name)
+
+    if model_id is None:
+        pytest.fail(
+            f"No HuggingFace model ID for parser '{parser_name}'. "
+            f"Add it to PARSER_TO_HF_MODEL in conftest.py"
+        )
+
+    if model_id not in _tokenizer_cache:
+        try:
+            _tokenizer_cache[model_id] = AutoTokenizer.from_pretrained(
+                model_id, trust_remote_code=True
+            )
+        except Exception as e:
+            pytest.fail(
+                f"Failed to load tokenizer '{model_id}' for parser '{parser_name}': {e}\n"
+                f"Try: huggingface-cli download {model_id}"
+            )
+
+    return _tokenizer_cache[model_id]
+
+
+# ============================================================================
+# Parametrized Fixtures
+# ============================================================================
+
+
+@pytest.fixture(params=list(PARSER_TO_HF_MODEL.keys()))
+def parser_name(request) -> str:
+    """Parametrized fixture that runs tests for all registered parsers."""
+    return request.param
+
+
+@pytest.fixture
+def formatter_name(parser_name: str) -> str:
+    """Alias for parser_name (formatters map 1:1 with parsers)."""
+    return parser_name
+
+
+@pytest.fixture
+def tokenizer(parser_name: str):
+    """Get tokenizer for the current parser_name fixture."""
+    return get_tokenizer_for_parser(parser_name)
+
+
+# ============================================================================
 # Result Collection
 # ============================================================================
 
