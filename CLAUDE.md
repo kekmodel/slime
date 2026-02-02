@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
 **slime** is an LLM post-training framework for RL scaling that powers GLM-4.5, GLM-4.6, and other models. It connects Megatron (training) with SGLang (inference) to enable high-performance RL training with flexible data generation workflows.
@@ -34,6 +32,10 @@ uv pip install -e .
 uv venv --python 3.12
 ```
 
+### Required Environment Variables
+- `PYTHONPATH=/path/to/Megatron-LM` - Megatron 학습 시 필수
+- `OPENROUTER_API_KEY` - examples/tool_calling 벤치마크 시
+
 ### Code Quality
 ```bash
 # Install pre-commit hooks
@@ -43,12 +45,13 @@ pre-commit install
 # Run all pre-commit checks
 pre-commit run --all-files --show-diff-on-failure --color=always
 
-# Individual formatters/linters (via pre-commit)
-# - ruff: linting (E, F, B, UP rules)
-# - autoflake: removes unused imports
-# - isort: sorts imports (black-compatible profile)
-# - black: code formatter (line length: 119)
 ```
+
+### Code Style
+- **Line length**: 119 (black)
+- **Imports**: isort (black-compatible profile)
+- **Linting**: ruff (E, F, B, UP rules)
+- **Type hints**: modern syntax (`list`, `dict`, `X | None`)
 
 ### Testing
 ```bash
@@ -143,8 +146,6 @@ Enable for better GPU utilization:
 --max-tokens-per-gpu 4608
 ```
 
-This packs samples of varying lengths so total tokens per micro-batch approaches the limit. Does not affect loss calculation due to proper masking.
-
 ## Debugging
 
 ### Separate Training/Inference Debugging
@@ -204,6 +205,7 @@ Download FP8 model variant (e.g., `Qwen/Qwen3-4B-FP8`) and set:
 
 ## Entry Points
 
-- `train.py`: Standard synchronous training
-- `train_async.py`: Fully asynchronous training mode (experimental)
+- `train.py` - 동기 학습 (기본)
+- `train_async.py` - 비동기 학습 (실험적)
+- `slime/utils/arguments.py` - 모든 argument 정의 (참조용)
 
