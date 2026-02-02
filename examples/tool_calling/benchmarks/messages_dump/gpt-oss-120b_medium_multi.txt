@@ -1,0 +1,103 @@
+# Model: gpt-oss-120b:medium
+# HF: openai/gpt-oss-120b
+# Mode: multi
+# Tokens: N/A
+
+# ERROR: Failed to apply_chat_template: Message has tool role, but there was no previous assistant message with a tool call!
+
+# Fallback: raw messages
+[
+  {
+    "role": "user",
+    "content": "Hello!"
+  },
+  {
+    "role": "assistant",
+    "content": "Hello! How can I help you today?",
+    "refusal": null,
+    "reasoning_details": [
+      {
+        "format": "unknown",
+        "index": 0,
+        "type": "reasoning.text",
+        "text": "The user says \"Hello!\" Just a greeting. Should respond friendly. No special instructions."
+      }
+    ],
+    "reasoning_content": "The user says \"Hello!\" Just a greeting. Should respond friendly. No special instructions."
+  },
+  {
+    "role": "user",
+    "content": "Get the prices of apple and banana, then calculate the average price using the calculator tool."
+  },
+  {
+    "role": "assistant",
+    "content": "\n<tool_call>get_price({\n  \"product\": \"apple\"\n})</tool_call>",
+    "refusal": null,
+    "reasoning_details": [
+      {
+        "format": "unknown",
+        "index": 0,
+        "type": "reasoning.text",
+        "text": "We need to get price of apple and banana using get_price tool, then compute average using calculator. Need to call get_price twice, then call calculator with expression (price1+price2)/2.\n\nWe need to call functions."
+      }
+    ],
+    "reasoning_content": "We need to get price of apple and banana using get_price tool, then compute average using calculator. Need to call get_price twice, then call calculator with expression (price1+price2)/2.\n\nWe need to call functions."
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_ofxiO8EPpnAVEscuYyWT6b6c",
+    "content": "1500"
+  },
+  {
+    "role": "assistant",
+    "content": "\n<tool_call>get_price({\n  \"product\": \"banana\"\n})</tool_call>",
+    "refusal": null,
+    "reasoning_details": [
+      {
+        "format": "unknown",
+        "index": 0,
+        "type": "reasoning.text",
+        "text": "We need also banana price."
+      }
+    ],
+    "reasoning_content": "We need also banana price."
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_0HXXxQs0B3PE96Jbm1CScbjk",
+    "content": "800"
+  },
+  {
+    "role": "assistant",
+    "content": "\n<tool_call>calculator({\n  \"expression\": \"(1500 + 800) / 2\"\n})</tool_call>",
+    "refusal": null,
+    "reasoning_details": [
+      {
+        "format": "unknown",
+        "index": 0,
+        "type": "reasoning.text",
+        "text": "We have apple price 1500, banana price 800. Need average: (1500+800)/2 = 1150. Use calculator tool."
+      }
+    ],
+    "reasoning_content": "We have apple price 1500, banana price 800. Need average: (1500+800)/2 = 1150. Use calculator tool."
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_iUgrIpvts6MUnpdXfFfAzckS",
+    "content": "1150.0"
+  },
+  {
+    "role": "assistant",
+    "content": "The average price of an apple (₱1,500) and a banana (₱800) is **₱1,150**.",
+    "refusal": null,
+    "reasoning_details": [
+      {
+        "format": "unknown",
+        "index": 0,
+        "type": "reasoning.text",
+        "text": "We need to respond with the result and perhaps explain."
+      }
+    ],
+    "reasoning_content": "We need to respond with the result and perhaps explain."
+  }
+]

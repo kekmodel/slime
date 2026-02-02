@@ -398,6 +398,7 @@ def run_single_turn_test(
     content_values = []
     total_values = []
     errors = []
+    last_messages = None  # Store last conversation for dump
 
     if verbose:
         print(f"\n[{config.name}] Single-turn test ({iterations} iterations)")
@@ -418,15 +419,21 @@ def run_single_turn_test(
             reasoning_values.append(metrics.reasoning)
             content_values.append(metrics.content)
             total_values.append(metrics.total)
+            # Save last successful conversation
+            last_messages = messages + [response["choices"][0]["message"]]
             if verbose:
-                print(f"  #{i+1}: r={metrics.reasoning:,} c={metrics.content:,} t={metrics.total:,}")
+                print(f"  #{i + 1}: r={metrics.reasoning:,} c={metrics.content:,} t={metrics.total:,}")
         else:
             error_msg = response.get("error", {}).get("message", "Unknown error")
             errors.append(error_msg)
             if verbose:
-                print(f"  #{i+1}: ERROR - {error_msg}")
+                print(f"  #{i + 1}: ERROR - {error_msg}")
 
         time.sleep(config.request_delay)  # Rate limiting
+
+    # Save last conversation messages
+    if last_messages:
+        save_messages_dump(last_messages, config.name, config.hf_model_id, "single")
 
     reasoning_stats = calculate_stats(reasoning_values)
     content_stats = calculate_stats(content_values)
@@ -496,6 +503,7 @@ def run_multi_turn_test(
             Tuple of (totals dict with reasoning/content/total, list of TurnMetrics)
         """
         messages = []
+        full_messages = []  # For dump: includes reasoning
         total_reasoning = 0
         total_content = 0
         turns = []
@@ -503,6 +511,7 @@ def run_multi_turn_test(
 
         # Turn 1: Greeting
         messages.append({"role": "user", "content": "Hello!"})
+        full_messages.append({"role": "user", "content": "Hello!"})
         response = call_api(
             model_id=config.model_id,
             messages=messages,
@@ -513,7 +522,7 @@ def run_multi_turn_test(
         )
 
         if "error" in response:
-            return None, [TurnMetrics("greeting", -1, -1, -1)]
+            return None, [TurnMetrics("greeting", -1, -1, -1)], full_messages
 
         msg = response["choices"][0]["message"]
         r, c, t = extract_metrics(msg)
@@ -521,14 +530,15 @@ def run_multi_turn_test(
         total_content += c
         turns.append(TurnMetrics("greeting", r, c, t))
         messages.append({"role": "assistant", "content": msg.get("content", "")})
+        full_messages.append(msg)  # Full response with reasoning
 
         # Turn 2+: Tool requests
-        messages.append(
-            {
-                "role": "user",
-                "content": "Get the prices of apple and banana, then calculate the average price using the calculator tool.",
-            }
-        )
+        user_msg = {
+            "role": "user",
+            "content": "Get the prices of apple and banana, then calculate the average price using the calculator tool.",
+        }
+        messages.append(user_msg)
+        full_messages.append(user_msg)
 
         # Loop to handle both parallel and sequential tool calls
         turn_count = 0
@@ -546,7 +556,7 @@ def run_multi_turn_test(
             )
 
             if "error" in response:
-                return None, turns + [TurnMetrics("error", -1, -1, -1)]
+                return None, turns + [TurnMetrics("error", -1, -1, -1)], full_messages
 
             msg = response["choices"][0]["message"]
             r, c, t = extract_metrics(msg)
@@ -557,6 +567,7 @@ def run_multi_turn_test(
             if not tool_calls:
                 # No more tool calls - this is the final answer
                 turns.append(TurnMetrics("final", r, c, t))
+                full_messages.append(msg)
                 break
 
             # Determine turn type based on tool being called
@@ -570,13 +581,16 @@ def run_multi_turn_test(
 
             # Execute tools
             messages.append({"role": "assistant", "content": msg.get("content", ""), "tool_calls": tool_calls})
+            full_messages.append(msg)
 
             for tc in tool_calls:
                 args = tc["function"]["arguments"]
                 if isinstance(args, str):
                     args = json.loads(args)
                 result = execute_tool(tc["function"]["name"], args)
-                messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
+                tool_msg = {"role": "tool", "tool_call_id": tc["id"], "content": result}
+                messages.append(tool_msg)
+                full_messages.append(tool_msg)
 
             # If calculator was called, next response should be final
             if turn_type == "calc_req":
@@ -590,13 +604,14 @@ def run_multi_turn_test(
                 )
 
                 if "error" in response:
-                    return None, turns + [TurnMetrics("final", -1, -1, -1)]
+                    return None, turns + [TurnMetrics("final", -1, -1, -1)], full_messages
 
                 msg = response["choices"][0]["message"]
                 r, c, t = extract_metrics(msg)
                 total_reasoning += r
                 total_content += c
                 turns.append(TurnMetrics("final", r, c, t))
+                full_messages.append(msg)
                 break
 
         totals = {
@@ -604,31 +619,35 @@ def run_multi_turn_test(
             "content": total_content,
             "total": total_reasoning + total_content,
         }
-        return totals, turns
+        return totals, turns, full_messages
 
     reasoning_values = []
     content_values = []
     total_values = []
     all_turns = []
+    last_messages = None
     errors = 0
 
     if verbose:
         print(f"\n[{config.name}] Multi-turn test ({iterations} iterations)")
 
     for i in range(iterations):
-        totals, turns = run_single_conversation()
+        totals, turns, conv_messages = run_single_conversation()
         if totals is not None:
+            last_messages = conv_messages
             reasoning_values.append(totals["reasoning"])
             content_values.append(totals["content"])
             total_values.append(totals["total"])
             all_turns.append(turns)
             turn_str = " → ".join([f"{t.name}:{t.reasoning}" for t in turns])
             if verbose:
-                print(f"  #{i+1}: r={totals['reasoning']:,} c={totals['content']:,} t={totals['total']:,} ({turn_str})")
+                print(
+                    f"  #{i + 1}: r={totals['reasoning']:,} c={totals['content']:,} t={totals['total']:,} ({turn_str})"
+                )
         else:
             errors += 1
             if verbose:
-                print(f"  #{i+1}: ERROR")
+                print(f"  #{i + 1}: ERROR")
 
         time.sleep(config.request_delay)
 
@@ -666,9 +685,11 @@ def run_multi_turn_test(
         print(f"  → turns={avg_turns:.1f} acc={accuracy:.0f}% {acc_marker}")
 
     # Convert TurnMetrics to serializable format
-    turns_serializable = [
-        [[t.name, t.reasoning, t.content, t.total] for t in conv_turns] for conv_turns in all_turns
-    ]
+    turns_serializable = [[[t.name, t.reasoning, t.content, t.total] for t in conv_turns] for conv_turns in all_turns]
+
+    # Save last conversation messages
+    if last_messages:
+        save_messages_dump(last_messages, config.name, config.hf_model_id, "multi")
 
     return {
         "config": config.name,
@@ -704,7 +725,9 @@ def print_comparison_table(results: list[dict], title: str = "Results"):
     is_multi = any(r.get("turn_stats") for r in results)
 
     if is_multi:
-        print(f"| {'Model':<22} | {'Reason':>8} | {'R.Range':>11} | {'Content':>8} | {'CV':>5} | {'Turns':>5} | {'Acc':>5} |")
+        print(
+            f"| {'Model':<22} | {'Reason':>8} | {'R.Range':>11} | {'Content':>8} | {'CV':>5} | {'Turns':>5} | {'Acc':>5} |"
+        )
         print(f"|{'-' * 24}|{'-' * 10}|{'-' * 13}|{'-' * 10}|{'-' * 7}|{'-' * 7}|{'-' * 7}|")
     else:
         print(f"| {'Model':<22} | {'Reason':>8} | {'R.Range':>11} | {'Content':>8} | {'CV':>5} |")
@@ -716,7 +739,6 @@ def print_comparison_table(results: list[dict], title: str = "Results"):
     for r in sorted_results:
         reasoning_stats = r.get("reasoning_stats", r["stats"])
         content_stats = r.get("content_stats", {"avg": 0})
-        total_stats = r.get("total_stats", r["stats"])
 
         cv_marker = "✅" if reasoning_stats["cv"] < 40 else ("⚠️" if reasoning_stats["cv"] < 60 else "❌")
         r_min = int(reasoning_stats.get("min", 0))
@@ -728,16 +750,68 @@ def print_comparison_table(results: list[dict], title: str = "Results"):
             accuracy = r.get("accuracy", 0)
             acc_marker = "✅" if accuracy >= 90 else ("⚠️" if accuracy >= 70 else "❌")
             print(
-                f"| {r['config']:<22} | {reasoning_stats['avg']:>8,.0f} | {r_range:>11} | {content_stats['avg']:>8,.0f} | "
-                f"{reasoning_stats['cv']:>3.0f}% {cv_marker} | {avg_turns:>5.1f} | {accuracy:>3.0f}% {acc_marker} |"
+                f"| {r['config']:<22} | {reasoning_stats['avg']:>8,.0f} | {r_range:>11} | {content_stats['avg']:>8,.0f} | {reasoning_stats['cv']:>3.0f}% {cv_marker} | {avg_turns:>5.1f} | {accuracy:>3.0f}% {acc_marker} |"
             )
         else:
             print(
-                f"| {r['config']:<22} | {reasoning_stats['avg']:>8,.0f} | {r_range:>11} | {content_stats['avg']:>8,.0f} | "
-                f"{reasoning_stats['cv']:>3.0f}% {cv_marker} |"
+                f"| {r['config']:<22} | {reasoning_stats['avg']:>8,.0f} | {r_range:>11} | {content_stats['avg']:>8,.0f} | {reasoning_stats['cv']:>3.0f}% {cv_marker} |"
             )
 
     print("=" * 80)
+
+
+def save_messages_dump(messages: list[dict], config_name: str, hf_model_id: str, mode: str) -> None:
+    """Save messages as JSON (original) and txt (decoded tokens with special tokens)."""
+    dump_dir = Path(__file__).parent / "messages_dump"
+    dump_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_name = config_name.replace(":", "_").replace("/", "_")
+
+    # 1. Save original messages as JSON (with tools for reference)
+    json_path = dump_dir / f"{safe_name}_{mode}.json"
+    json_output = {
+        "model": config_name,
+        "hf_model_id": hf_model_id,
+        "mode": mode,
+        "timestamp": datetime.now().isoformat(),
+        "tools": TOOLS,
+        "messages": messages,
+    }
+    json_path.write_text(json.dumps(json_output, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # 2. Save decoded tokens with special tokens as txt
+    txt_path = dump_dir / f"{safe_name}_{mode}.txt"
+
+    # Convert 'reasoning' -> 'reasoning_content' for tokenizer compatibility
+    converted = []
+    for msg in messages:
+        m = dict(msg)
+        if "reasoning" in m:
+            m["reasoning_content"] = m.pop("reasoning")
+        # Remove tool_calls for simpler tokenization (causes template errors)
+        if "tool_calls" in m:
+            # Serialize tool_calls into content for visibility
+            tc_str = "\n".join(
+                f"<tool_call>{tc['function']['name']}({tc['function']['arguments']})</tool_call>"
+                for tc in m["tool_calls"]
+            )
+            m["content"] = (m.get("content") or "") + "\n" + tc_str
+            del m["tool_calls"]
+        converted.append(m)
+
+    tokenizer = get_tokenizer(hf_model_id)
+    token_count = "N/A"
+    try:
+        # Tokenize with apply_chat_template (include tools)
+        token_ids = tokenizer.apply_chat_template(converted, tools=TOOLS, tokenize=True, add_generation_prompt=False)
+        token_count = len(token_ids)
+        # Decode with special tokens visible
+        decoded_text = tokenizer.decode(token_ids, skip_special_tokens=False)
+    except Exception as e:
+        decoded_text = f"# ERROR: Failed to apply_chat_template: {e}\n\n# Fallback: raw messages\n{json.dumps(converted, indent=2, ensure_ascii=False)}"
+
+    header = f"# Model: {config_name}\n# HF: {hf_model_id}\n# Mode: {mode}\n# Tokens: {token_count}\n\n"
+    txt_path.write_text(header + decoded_text, encoding="utf-8")
 
 
 def save_results(results: list[dict], output_dir: str | None = None) -> str:

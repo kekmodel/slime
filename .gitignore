@@ -200,3 +200,6 @@ examples/tool_calling/.env
 examples/tool_calling/tests/*_20*.json
 examples/tool_calling/tests/*_20*.txt
 examples/tool_calling/tests/outputs/debug/
+
+# Benchmark message dumps (tracked for pattern analysis)
+!examples/tool_calling/benchmarks/messages_dump/

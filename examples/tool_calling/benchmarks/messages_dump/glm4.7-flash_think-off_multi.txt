@@ -1,0 +1,27 @@
+# Model: glm4.7-flash:think-off
+# HF: zai-org/GLM-4.7-Flash
+# Mode: multi
+# Tokens: 2
+
+[gMASK]<sop><|system|>
+# Tools
+
+You may call one or more functions to assist with the user query.
+
+You are provided with function signatures within <tools></tools> XML tags:
+<tools>
+{"type": "function", "function": {"name": "get_price", "description": "Get the current price of a product", "parameters": {"type": "object", "properties": {"product": {"type": "string", "description": "Product name"}}, "required": ["product"]}}}
+{"type": "function", "function": {"name": "calculator", "description": "Evaluate a mathematical expression", "parameters": {"type": "object", "properties": {"expression": {"type": "string", "description": "Math expression"}}, "required": ["expression"]}}}
+</tools>
+
+For each function call, output the function name and arguments within the following XML format:
+<tool_call>{function-name}<arg_key>{arg-key-1}</arg_key><arg_value>{arg-value-1}</arg_value><arg_key>{arg-key-2}</arg_key><arg_value>{arg-value-2}</arg_value>...</tool_call><|user|>Hello!<|assistant|></think>Hello! I'm the GLM large language model trained by Z.ai. How can I assist you today? Whether you have questions, need information, or just want to chat, I'm here to help in a helpful and respectful manner.<|user|>Get the prices of apple and banana, then calculate the average price using the calculator tool.<|assistant|></think>I'll help you get the prices for apple and banana, then calculate the average. Let me fetch those prices first.
+<tool_call>get_price({"product":"apple"})</tool_call>
+<tool_call>get_price({"product":"banana"})</tool_call><|observation|><tool_response>1500</tool_response><tool_response>800</tool_response><|assistant|></think>Now I'll calculate the average price of apple and banana using the calculator:
+<tool_call>calculator({"expression": "(1500 + 800) / 2"})</tool_call><|observation|><tool_response>1150.0</tool_response><|assistant|></think>Here are the results:
+
+**Prices:**
+- Apple: 1,500
+- Banana: 800
+
+**Average Price:** 1,150.0

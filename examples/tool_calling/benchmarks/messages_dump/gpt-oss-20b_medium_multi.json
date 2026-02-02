@@ -1,0 +1,174 @@
+{
+  "model": "gpt-oss-20b:medium",
+  "hf_model_id": "openai/gpt-oss-20b",
+  "mode": "multi",
+  "timestamp": "2026-02-03T04:58:02.009821",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_price",
+        "description": "Get the current price of a product",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "product": {
+              "type": "string",
+              "description": "Product name"
+            }
+          },
+          "required": [
+            "product"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calculator",
+        "description": "Evaluate a mathematical expression",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "Math expression"
+            }
+          },
+          "required": [
+            "expression"
+          ]
+        }
+      }
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello!"
+    },
+    {
+      "role": "assistant",
+      "content": "Hi there! 👋 How can I help you today?",
+      "refusal": null,
+      "reasoning": "User says \"Hello!\". We need a brief greeting. Probably friendly.",
+      "reasoning_details": [
+        {
+          "format": "unknown",
+          "index": 0,
+          "type": "reasoning.text",
+          "text": "User says \"Hello!\". We need a brief greeting. Probably friendly."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "Get the prices of apple and banana, then calculate the average price using the calculator tool."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "refusal": null,
+      "reasoning": "We need to use tool get_price twice: for apple and banana. Then compute average: (price_apple + price_banana)/2. Then use calculator to compute average expression.\n\nWe should call get_price twice. Then use calculator with expression \"({price_apple}+{price_banana})/2\". We'll need to handle placeholders. Probably we need to do it in order: first call get_price for apple, then banana, then calculate. Let's do that.",
+      "tool_calls": [
+        {
+          "type": "function",
+          "index": 0,
+          "id": "call_wW9CQXDVYrdYVWn0cNiafhAW",
+          "function": {
+            "name": "get_price",
+            "arguments": "{\"product\":\"apple\"}"
+          }
+        }
+      ],
+      "reasoning_details": [
+        {
+          "format": "unknown",
+          "index": 0,
+          "type": "reasoning.text",
+          "text": "We need to use tool get_price twice: for apple and banana. Then compute average: (price_apple + price_banana)/2. Then use calculator to compute average expression.\n\nWe should call get_price twice. Then use calculator with expression \"({price_apple}+{price_banana})/2\". We'll need to handle placeholders. Probably we need to do it in order: first call get_price for apple, then banana, then calculate. Let's do that."
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_wW9CQXDVYrdYVWn0cNiafhAW",
+      "content": "1500"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "refusal": null,
+      "reasoning": "Now get price banana.",
+      "tool_calls": [
+        {
+          "type": "function",
+          "index": 0,
+          "id": "call_l3eytCodpRstE33E93vnykYa",
+          "function": {
+            "name": "get_price",
+            "arguments": "{\"product\":\"banana\"}"
+          }
+        }
+      ],
+      "reasoning_details": [
+        {
+          "format": "unknown",
+          "index": 0,
+          "type": "reasoning.text",
+          "text": "Now get price banana."
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_l3eytCodpRstE33E93vnykYa",
+      "content": "800"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "refusal": null,
+      "reasoning": "We have prices: apple 1500 (probably cents or something, but numeric), banana 800. Need average: (1500+800)/2 = 1150. Let's call calculator.",
+      "tool_calls": [
+        {
+          "type": "function",
+          "index": 0,
+          "id": "call_rZ24RKwuPZIFWmP97J3nsOY5",
+          "function": {
+            "name": "calculator",
+            "arguments": "{\"expression\":\"(1500+800)/2\"}"
+          }
+        }
+      ],
+      "reasoning_details": [
+        {
+          "format": "unknown",
+          "index": 0,
+          "type": "reasoning.text",
+          "text": "We have prices: apple 1500 (probably cents or something, but numeric), banana 800. Need average: (1500+800)/2 = 1150. Let's call calculator."
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_rZ24RKwuPZIFWmP97J3nsOY5",
+      "content": "1150.0"
+    },
+    {
+      "role": "assistant",
+      "content": "Here’s the calculation:\n\n- **Apple price:** 1500  \n- **Banana price:** 800  \n\nAverage price  \n\\[\n\\frac{1500 + 800}{2} = 1150.0\n\\]\n\n**Result:** The average price of an apple and a banana is **1150.0**.",
+      "refusal": null,
+      "reasoning": "The user asked: \"Get the prices of apple and banana, then calculate the average price using the calculator tool.\" We fetched prices via get_price for apple=1500 and banana=800. Then used calculator with expression \"(1500+800)/2\" resulting 1150.0. We should output the result in a user-friendly way: maybe \"The average price of apple and banana is 1150.0.\" Provide explanation.",
+      "reasoning_details": [
+        {
+          "format": "unknown",
+          "index": 0,
+          "type": "reasoning.text",
+          "text": "The user asked: \"Get the prices of apple and banana, then calculate the average price using the calculator tool.\" We fetched prices via get_price for apple=1500 and banana=800. Then used calculator with expression \"(1500+800)/2\" resulting 1150.0. We should output the result in a user-friendly way: maybe \"The average price of apple and banana is 1150.0.\" Provide explanation."
+        }
+      ]
+    }
+  ]
+}
