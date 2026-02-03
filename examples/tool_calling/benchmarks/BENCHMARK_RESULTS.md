@@ -35,15 +35,10 @@
 
 1. [TL;DR](#tldr)
 2. [모델 아키텍처](#모델-아키텍처)
-3. [Latency 예상 순위](#latency-예상-순위-한국어)
-4. [벤치마크 결과](#벤치마크-결과)
-   - [싱글턴 (EN)](#싱글턴-tool-calling-benchmark-n20)
-   - [멀티턴 (EN)](#멀티턴-tool-calling-benchmark-n10)
-   - [멀티턴 (KO)](#멀티턴-tool-calling-benchmark---한국어-n10)
-5. [Key Insights](#key-insights)
-6. [Parallel Tool Calling 지원](#parallel-tool-calling-지원)
-7. [API 설정 가이드](#모델별-api-설정)
-8. [컬럼 설명](#컬럼-설명)
+3. [벤치마크 결과](#벤치마크-결과)
+4. [컬럼 설명](#컬럼-설명)
+5. [Latency 분석](#latency-분석)
+6. [API 설정 가이드](#모델별-api-설정)
 
 ---
 
@@ -63,53 +58,6 @@
 **핵심**:
 - 총 파라미터가 아닌 **Active 파라미터 (3~5B)** 가 Latency 결정
 - **MTP/Eagle 지원**: glm4.7-flash, qwen3-next-80b → Speculative Decoding으로 추가 속도 향상
-
----
-
-## Latency 예상 순위 (한국어)
-
-> RTT 무시, 순수 Decode 시간만 계산
-> MTP Accept Rate ~55% 가정 (÷1.55 속도 향상)
-
-### TPS 가정
-
-| 모델 | Active | TPS | 비고 |
-|------|--------|-----|------|
-| glm4.7-flash | 3B | 300 | MoE + MTP |
-| qwen3-30b | 3.3B | 280 | MoE |
-| nemotron3-nano | 3.5B | 260 | Hybrid Mamba-MoE |
-| gpt-oss-20b | 3.6B | 250 | MoE |
-| qwen3-next-80b | 3.9B | 230 | MoE + MTP |
-| gpt-oss-120b | 5.1B | 180 | MoE |
-
-### 전체 모델 Latency 순위
-
-| 순위 | 모델 | Decode 토큰 | MTP | 예상 Latency | Acc | 추천 |
-|------|------|-------------|-----|--------------|-----|------|
-| 1 | nemotron3-nano:think-off | 91 | ❌ | ~0.35s | **40%** ❌ | ❌ |
-| 2 | gpt-oss-20b:low | 93 | ❌ | **~0.37s** | 100% ✅ | ✅ |
-| 2 | **glm4.7-flash:think-off** | 172 | ✅ | **~0.37s** | 100% ✅ | 🏆 |
-| 4 | gpt-oss-120b:low | 89 | ❌ | ~0.49s | 100% ✅ | ✅ |
-| 5 | gpt-oss-20b:medium | 245 | ❌ | ~0.98s | 100% ✅ | ✅ |
-| 6 | gpt-oss-120b:medium | 210 | ❌ | ~1.17s | 100% ✅ | ✅ |
-| 7 | glm4.7-flash:think-turn | 973 | ✅ | ~2.09s | 100% ✅ | ⚠️ |
-| 8 | **glm4.7-flash:think-all** | 1135 | ✅ | **~2.44s** | 100% ✅ | ✅ |
-| 9 | qwen3-30b | 802 | ❌ | ~2.86s | **60%** ❌ | ❌ |
-| 10 | gpt-oss-120b:high | 834 | ❌ | ~4.63s | 100% ✅ | ✅ |
-| 11 | gpt-oss-20b:high | 1937 | ❌ | ~7.75s | 100% ✅ | ✅ |
-| 12 | qwen3-next-80b | 2994 | ✅ | ~8.40s | **80%** ⚠️ | ❌ |
-| 13 | nemotron3-nano | 2474 | ❌ | ~9.52s | 90% ⚠️ | ❌ |
-
-### think-turn 비추천 이유
-
-| 항목 | think-turn | think-all |
-|------|------------|-----------|
-| CV (안정성) | **51% ⚠️** | 25% ✅ |
-| KV 캐시 | ❌ 삭제됨 | ✅ 유지 |
-| Latency | ~2.1s | ~2.4s |
-
-- think-turn: 매 턴 reasoning 생성 후 삭제 → **KV 캐시 미스**
-- Latency 이점 적고 CV 불안정 → **사용 이유 없음**
 
 ---
 
@@ -193,64 +141,6 @@
 
 ---
 
-## Key Insights
-
-### 1. 멀티턴이 싱글턴보다 안정적
-
-| Model | Single R.CV | Multi R.CV |
-|-------|-------------|------------|
-| nemotron3-nano | 249% ❌ | 59% ⚠️ |
-| gpt-oss-20b:high | 140% ❌ | 45% ⚠️ |
-| qwen3-30b | 89% ❌ | 18% ✅ |
-
-**원인**: 대화 컨텍스트가 모델의 reasoning을 "가이드"
-- 싱글턴: 매번 처음부터 상황 파악 → 불확실성 높음 → 폭발 가능
-- 멀티턴: 이전 턴들이 방향 설정 → reasoning이 bounded됨
-
-### 2. Reasoning 폭발 현상
-
-nemotron3-nano 싱글턴에서 **54,992 토큰** 폭발 사례 발생
-- 모델이 "길을 잃고" 끝없이 reasoning
-- 비용 예측 불가 → 프로덕션 위험
-
-### 3. 모델 크기와 안정성
-
-| Model | Size | R.CV (Single) | R.CV (Multi) |
-|-------|------|---------------|--------------|
-| gpt-oss-120b:high | 120B | 49% ⚠️ | 22% ✅ |
-| gpt-oss-20b:high | 20B | 140% ❌ | 45% ⚠️ |
-
-더 큰 모델이 더 안정적인 reasoning 출력
-
----
-
-## Parallel Tool Calling 지원
-
-| model_id | Parallel | Turn 분포 | 비고 |
-|----------|----------|-----------|------|
-| **glm4.7-flash** | ✅ Yes | 4턴: 30회 (100%) | 완벽한 병렬 |
-| **gpt-oss-120b** | ❌ No | 5턴: 30회 (100%) | 완벽한 순차 |
-| **gpt-oss-20b** | ❌ No | 5턴: 29회, 2턴: 1회 | 순차 |
-| **nemotron3-nano** | ✅ Yes | 4턴 있음 | 병렬 but Acc 80~90%, CV 높음 |
-| **qwen3-30b** | ✅ Yes | 4턴: 7회, 3턴: 2회, 5턴: 1회 | 병렬 but Acc 80% |
-| **qwen3-next-80b** | ✅ Yes | 4턴: 5회, 5턴: 3회, 2턴: 2회 | 병렬 but Acc 80% |
-
-> 동일 model_id는 동일 특성 (예: gpt-oss-120b:low/medium/high 모두 순차)
-
----
-
-## 모델별 API 설정
-
-| Model | API Parameter | 설명 |
-|-------|---------------|------|
-| gpt-oss:* | `reasoning: {effort: "low\|medium\|high"}` | reasoning 깊이 조절 |
-| glm4.7-flash:think-all | `thinking: {type: "enabled", clear_thinking: false}` | 전체 thinking 유지 |
-| glm4.7-flash:think-turn | `thinking: {type: "enabled", clear_thinking: true}` | 턴별 thinking (후 제거) |
-| glm4.7-flash:think-off | `reasoning: {effort: "none"}` | thinking 끔 |
-| qwen3-* | - | 기본 설정만 지원 |
-
----
-
 ## 컬럼 설명
 
 | 컬럼 | 설명 |
@@ -280,3 +170,104 @@ nemotron3-nano 싱글턴에서 **54,992 토큰** 폭발 사례 발생
 | **4턴** | greeting → price_req(2개 병렬) → calc_req → final |
 | **5턴** | greeting → price_req → price_req → calc_req → final (순차) |
 | **< 4턴** | 일부 단계 생략 (비정상) |
+
+---
+
+## Latency 분석
+
+> RTT 무시, 순수 Decode 시간만 계산
+> MTP Accept Rate ~55% 가정 (÷1.55 속도 향상)
+
+### TPS 가정
+
+| 모델 | Active | TPS | 비고 |
+|------|--------|-----|------|
+| glm4.7-flash | 3B | 300 | MoE + MTP |
+| qwen3-30b | 3.3B | 280 | MoE |
+| nemotron3-nano | 3.5B | 260 | Hybrid Mamba-MoE |
+| gpt-oss-20b | 3.6B | 250 | MoE |
+| qwen3-next-80b | 3.9B | 230 | MoE + MTP |
+| gpt-oss-120b | 5.1B | 180 | MoE |
+
+### 전체 모델 Latency 순위 (한국어)
+
+| 순위 | 모델 | Decode 토큰 | MTP | 예상 Latency | Acc | 추천 |
+|------|------|-------------|-----|--------------|-----|------|
+| 1 | nemotron3-nano:think-off | 91 | ❌ | ~0.35s | **40%** ❌ | ❌ |
+| 2 | gpt-oss-20b:low | 93 | ❌ | **~0.37s** | 100% ✅ | ✅ |
+| 2 | **glm4.7-flash:think-off** | 172 | ✅ | **~0.37s** | 100% ✅ | 🏆 |
+| 4 | gpt-oss-120b:low | 89 | ❌ | ~0.49s | 100% ✅ | ✅ |
+| 5 | gpt-oss-20b:medium | 245 | ❌ | ~0.98s | 100% ✅ | ✅ |
+| 6 | gpt-oss-120b:medium | 210 | ❌ | ~1.17s | 100% ✅ | ✅ |
+| 7 | glm4.7-flash:think-turn | 973 | ✅ | ~2.09s | 100% ✅ | ⚠️ |
+| 8 | **glm4.7-flash:think-all** | 1135 | ✅ | **~2.44s** | 100% ✅ | ✅ |
+| 9 | qwen3-30b | 802 | ❌ | ~2.86s | **60%** ❌ | ❌ |
+| 10 | gpt-oss-120b:high | 834 | ❌ | ~4.63s | 100% ✅ | ✅ |
+| 11 | gpt-oss-20b:high | 1937 | ❌ | ~7.75s | 100% ✅ | ✅ |
+| 12 | qwen3-next-80b | 2994 | ✅ | ~8.40s | **80%** ⚠️ | ❌ |
+| 13 | nemotron3-nano | 2474 | ❌ | ~9.52s | 90% ⚠️ | ❌ |
+
+### think-turn 비추천 이유
+
+| 항목 | think-turn | think-all |
+|------|------------|-----------|
+| CV (안정성) | **51% ⚠️** | 25% ✅ |
+| KV 캐시 | ❌ 삭제됨 | ✅ 유지 |
+| Latency | ~2.1s | ~2.4s |
+
+- think-turn: 매 턴 reasoning 생성 후 삭제 → **KV 캐시 미스**
+- Latency 이점 적고 CV 불안정 → **사용 이유 없음**
+
+### Key Insights
+
+#### 1. 멀티턴이 싱글턴보다 안정적
+
+| Model | Single R.CV | Multi R.CV |
+|-------|-------------|------------|
+| nemotron3-nano | 249% ❌ | 59% ⚠️ |
+| gpt-oss-20b:high | 140% ❌ | 45% ⚠️ |
+| qwen3-30b | 89% ❌ | 18% ✅ |
+
+**원인**: 대화 컨텍스트가 모델의 reasoning을 "가이드"
+- 싱글턴: 매번 처음부터 상황 파악 → 불확실성 높음 → 폭발 가능
+- 멀티턴: 이전 턴들이 방향 설정 → reasoning이 bounded됨
+
+#### 2. Reasoning 폭발 현상
+
+nemotron3-nano 싱글턴에서 **54,992 토큰** 폭발 사례 발생
+- 모델이 "길을 잃고" 끝없이 reasoning
+- 비용 예측 불가 → 프로덕션 위험
+
+#### 3. 모델 크기와 안정성
+
+| Model | Size | R.CV (Single) | R.CV (Multi) |
+|-------|------|---------------|--------------|
+| gpt-oss-120b:high | 120B | 49% ⚠️ | 22% ✅ |
+| gpt-oss-20b:high | 20B | 140% ❌ | 45% ⚠️ |
+
+더 큰 모델이 더 안정적인 reasoning 출력
+
+### Parallel Tool Calling 지원
+
+| model_id | Parallel | Turn 분포 | 비고 |
+|----------|----------|-----------|------|
+| **glm4.7-flash** | ✅ Yes | 4턴: 30회 (100%) | 완벽한 병렬 |
+| **gpt-oss-120b** | ❌ No | 5턴: 30회 (100%) | 완벽한 순차 |
+| **gpt-oss-20b** | ❌ No | 5턴: 29회, 2턴: 1회 | 순차 |
+| **nemotron3-nano** | ✅ Yes | 4턴 있음 | 병렬 but Acc 80~90%, CV 높음 |
+| **qwen3-30b** | ✅ Yes | 4턴: 7회, 3턴: 2회, 5턴: 1회 | 병렬 but Acc 80% |
+| **qwen3-next-80b** | ✅ Yes | 4턴: 5회, 5턴: 3회, 2턴: 2회 | 병렬 but Acc 80% |
+
+> 동일 model_id는 동일 특성 (예: gpt-oss-120b:low/medium/high 모두 순차)
+
+---
+
+## 모델별 API 설정
+
+| Model | API Parameter | 설명 |
+|-------|---------------|------|
+| gpt-oss:* | `reasoning: {effort: "low\|medium\|high"}` | reasoning 깊이 조절 |
+| glm4.7-flash:think-all | `thinking: {type: "enabled", clear_thinking: false}` | 전체 thinking 유지 |
+| glm4.7-flash:think-turn | `thinking: {type: "enabled", clear_thinking: true}` | 턴별 thinking (후 제거) |
+| glm4.7-flash:think-off | `reasoning: {effort: "none"}` | thinking 끔 |
+| qwen3-* | - | 기본 설정만 지원 |
