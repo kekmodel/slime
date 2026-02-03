@@ -1,0 +1,42 @@
+# Model: gpt-oss-120b:high
+# HF: openai/gpt-oss-120b
+# Mode: multi
+# Tokens: 604
+
+<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.
+Knowledge cutoff: 2024-06
+Current date: 2026-02-03
+
+Reasoning: medium
+
+# Valid channels: analysis, commentary, final. Channel must be included for every message.
+Calls to these tools must go to the commentary channel: 'functions'.<|end|><|start|>developer<|message|># Tools
+
+## functions
+
+namespace functions {
+
+// Get the current price of a product
+type get_price = (_: {
+// Product name
+product: string,
+}) => any;
+
+// Evaluate a mathematical expression
+type calculator = (_: {
+// Math expression
+expression: string,
+}) => any;
+
+} // namespace functions<|end|><|start|>user<|message|>안녕하세요!<|end|><|start|>assistant<|channel|>final<|message|>안녕하세요! 저는 ChatGPT예요. 무엇을 도와드릴까요? 언제든 편하게 말씀해주세요.<|end|><|start|>user<|message|>apple과 banana의 가격을 조회한 후, 계산기 도구를 사용해서 평균 가격을 계산해주세요.<|end|><|start|>assistant to=functions.get_price<|channel|>commentary json<|message|>{"product": "apple"}<|call|><|start|>functions.get_price to=assistant<|channel|>commentary<|message|>"1500"<|end|><|start|>assistant to=functions.get_price<|channel|>commentary json<|message|>{"product": "banana"}<|call|><|start|>functions.get_price to=assistant<|channel|>commentary<|message|>"800"<|end|><|start|>assistant to=functions.calculator<|channel|>commentary json<|message|>{"expression": "(1500+800)/2"}<|call|><|start|>functions.calculator to=assistant<|channel|>commentary<|message|>"1150.0"<|end|><|start|>assistant<|channel|>analysis<|message|>The user wants to "apple과 banana의 가격을 조회한 후, 계산기 도구를 사용해서 평균 가격을 계산해주세요." The assistant already called get_price for apple, got 1500, called get_price for banana, got 800, then used calculator to compute average, got 1150.0. Now we need to respond with the result. Also we may provide the information about the average price, possibly rounding or formatting. The user is Korean; we should respond in Korean. Possibly also mention the individual prices and the average. So produce a response: "Apple price: 1500, Banana price: 800, average: 1150". Possibly clarify currency. Could be "원". The price is presumably in KRW (Korean won). So answer: "사과는 1,500원, 바나나는 800원이며, 평균 가격은 1,150원입니다." Also mention we used the calculator.
+
+We might also ask if there's anything else.
+
+Thus final answer.<|end|><|start|>assistant<|channel|>final<|message|>각 제품의 가격은 다음과 같습니다:
+
+- 사과(apple): **1,500원**
+- 바나나(banana): **800원**
+
+두 가격의 평균을 계산하면 **1,150원**이 됩니다.
+
+다른 제품의 가격을 확인하거나 추가로 계산이 필요하시면 언제든 알려 주세요!<|return|>

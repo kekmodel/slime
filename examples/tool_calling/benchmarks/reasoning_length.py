@@ -90,6 +90,20 @@ DEFAULT_TOP_P = 0.95
 DEFAULT_ITERATIONS = 20
 DEFAULT_TIMEOUT = 120
 
+# Prompts by language
+PROMPTS = {
+    "en": {
+        "single_turn": "How much would it cost to buy an apple and a banana?",
+        "greeting": "Hello!",
+        "task": "Get the prices of apple and banana, then calculate the average price using the calculator tool.",
+    },
+    "ko": {
+        "single_turn": "apple과 banana를 사려면 얼마가 필요할까요?",
+        "greeting": "안녕하세요!",
+        "task": "apple과 banana의 가격을 조회한 후, 계산기 도구를 사용해서 평균 가격을 계산해주세요.",
+    },
+}
+
 
 @dataclass
 class ModelConfig:
@@ -123,6 +137,30 @@ def count_tokens(text: str, hf_model_id: str) -> int:
 
 # Model configurations to test
 MODEL_CONFIGS: list[ModelConfig] = [
+    ModelConfig(
+        name="glm4.7-flash:think-off",
+        model_id="z-ai/glm-4.7-flash",
+        provider="Z.AI",
+        hf_model_id="zai-org/GLM-4.7-Flash",
+        extra_params={"reasoning": {"effort": "none"}},
+        description="Thinking disabled - no reasoning tokens",
+    ),
+    ModelConfig(
+        name="glm4.7-flash:think-turn",
+        model_id="z-ai/glm-4.7-flash",
+        provider="Z.AI",
+        hf_model_id="zai-org/GLM-4.7-Flash",
+        extra_params={"thinking": {"type": "enabled", "clear_thinking": True}},
+        description="Turn-level thinking - cleared after each turn",
+    ),
+    ModelConfig(
+        name="glm4.7-flash:think-all",
+        model_id="z-ai/glm-4.7-flash",
+        provider="Z.AI",
+        hf_model_id="zai-org/GLM-4.7-Flash",
+        extra_params={"thinking": {"type": "enabled", "clear_thinking": False}},
+        description="Preserved thinking - all tokens kept",
+    ),
     ModelConfig(
         name="gpt-oss-120b:low",
         model_id="openai/gpt-oss-120b",
@@ -170,30 +208,6 @@ MODEL_CONFIGS: list[ModelConfig] = [
         hf_model_id="openai/gpt-oss-20b",
         extra_params={"reasoning": {"effort": "high"}},
         description="Smaller model - high effort",
-    ),
-    ModelConfig(
-        name="glm4.7-flash:think-off",
-        model_id="z-ai/glm-4.7-flash",
-        provider="Z.AI",
-        hf_model_id="zai-org/GLM-4.7-Flash",
-        extra_params={"reasoning": {"effort": "none"}},
-        description="Thinking disabled - no reasoning tokens",
-    ),
-    ModelConfig(
-        name="glm4.7-flash:think-all",
-        model_id="z-ai/glm-4.7-flash",
-        provider="Z.AI",
-        hf_model_id="zai-org/GLM-4.7-Flash",
-        extra_params={"thinking": {"type": "enabled", "clear_thinking": False}},
-        description="Preserved thinking - all tokens kept",
-    ),
-    ModelConfig(
-        name="glm4.7-flash:think-turn",
-        model_id="z-ai/glm-4.7-flash",
-        provider="Z.AI",
-        hf_model_id="zai-org/GLM-4.7-Flash",
-        extra_params={"thinking": {"type": "enabled", "clear_thinking": True}},
-        description="Turn-level thinking - cleared after each turn",
     ),
     ModelConfig(
         name="qwen3-30b",
@@ -389,16 +403,16 @@ def run_single_turn_test(
     temperature: float = DEFAULT_TEMPERATURE,
     top_p: float = DEFAULT_TOP_P,
     verbose: bool = True,
+    lang: str = "en",
 ) -> dict[str, Any]:
     """Run single-turn reasoning length test."""
-    prompt = "How much would it cost to buy an apple and a banana?"
+    prompt = PROMPTS[lang]["single_turn"]
     messages = [{"role": "user", "content": prompt}]
 
     reasoning_values = []
     content_values = []
     total_values = []
     errors = []
-    last_messages = None  # Store last conversation for dump
 
     if verbose:
         print(f"\n[{config.name}] Single-turn test ({iterations} iterations)")
@@ -419,8 +433,9 @@ def run_single_turn_test(
             reasoning_values.append(metrics.reasoning)
             content_values.append(metrics.content)
             total_values.append(metrics.total)
-            # Save last successful conversation
-            last_messages = messages + [response["choices"][0]["message"]]
+            # Save each iteration's conversation
+            iter_messages = messages + [response["choices"][0]["message"]]
+            save_messages_dump(iter_messages, config.name, config.hf_model_id, "single", lang, iterations, i + 1)
             if verbose:
                 print(f"  #{i + 1}: r={metrics.reasoning:,} c={metrics.content:,} t={metrics.total:,}")
         else:
@@ -430,10 +445,6 @@ def run_single_turn_test(
                 print(f"  #{i + 1}: ERROR - {error_msg}")
 
         time.sleep(config.request_delay)  # Rate limiting
-
-    # Save last conversation messages
-    if last_messages:
-        save_messages_dump(last_messages, config.name, config.hf_model_id, "single")
 
     reasoning_stats = calculate_stats(reasoning_values)
     content_stats = calculate_stats(content_values)
@@ -479,8 +490,10 @@ def run_multi_turn_test(
     temperature: float = DEFAULT_TEMPERATURE,
     top_p: float = DEFAULT_TOP_P,
     verbose: bool = True,
+    lang: str = "en",
 ) -> dict[str, Any]:
     """Run multi-turn reasoning length test."""
+    prompts = PROMPTS[lang]
 
     def extract_metrics(msg: dict) -> tuple[int, int, int]:
         """Extract reasoning, content, total token counts from message."""
@@ -510,8 +523,8 @@ def run_multi_turn_test(
         max_turns = 10  # Safety limit
 
         # Turn 1: Greeting
-        messages.append({"role": "user", "content": "Hello!"})
-        full_messages.append({"role": "user", "content": "Hello!"})
+        messages.append({"role": "user", "content": prompts["greeting"]})
+        full_messages.append({"role": "user", "content": prompts["greeting"]})
         response = call_api(
             model_id=config.model_id,
             messages=messages,
@@ -535,7 +548,7 @@ def run_multi_turn_test(
         # Turn 2+: Tool requests
         user_msg = {
             "role": "user",
-            "content": "Get the prices of apple and banana, then calculate the average price using the calculator tool.",
+            "content": prompts["task"],
         }
         messages.append(user_msg)
         full_messages.append(user_msg)
@@ -625,7 +638,6 @@ def run_multi_turn_test(
     content_values = []
     total_values = []
     all_turns = []
-    last_messages = None
     errors = 0
 
     if verbose:
@@ -634,11 +646,12 @@ def run_multi_turn_test(
     for i in range(iterations):
         totals, turns, conv_messages = run_single_conversation()
         if totals is not None:
-            last_messages = conv_messages
             reasoning_values.append(totals["reasoning"])
             content_values.append(totals["content"])
             total_values.append(totals["total"])
             all_turns.append(turns)
+            # Save each iteration's conversation
+            save_messages_dump(conv_messages, config.name, config.hf_model_id, "multi", lang, iterations, i + 1)
             turn_str = " → ".join([f"{t.name}:{t.reasoning}" for t in turns])
             if verbose:
                 print(
@@ -686,10 +699,6 @@ def run_multi_turn_test(
 
     # Convert TurnMetrics to serializable format
     turns_serializable = [[[t.name, t.reasoning, t.content, t.total] for t in conv_turns] for conv_turns in all_turns]
-
-    # Save last conversation messages
-    if last_messages:
-        save_messages_dump(last_messages, config.name, config.hf_model_id, "multi")
 
     return {
         "config": config.name,
@@ -760,19 +769,35 @@ def print_comparison_table(results: list[dict], title: str = "Results"):
     print("=" * 80)
 
 
-def save_messages_dump(messages: list[dict], config_name: str, hf_model_id: str, mode: str) -> None:
+def save_messages_dump(
+    messages: list[dict],
+    config_name: str,
+    hf_model_id: str,
+    mode: str,
+    lang: str = "en",
+    iterations: int = 1,
+    iter_num: int | None = None,
+) -> None:
     """Save messages as JSON (original) and txt (decoded tokens with special tokens)."""
     dump_dir = Path(__file__).parent / "messages_dump"
     dump_dir.mkdir(parents=True, exist_ok=True)
 
     safe_name = config_name.replace(":", "_").replace("/", "_")
+    # Include lang, iterations, and iter_num in filename to avoid overwrites
+    if iter_num is not None:
+        filename_base = f"{safe_name}_{lang}_{mode}_n{iterations}_iter{iter_num}"
+    else:
+        filename_base = f"{safe_name}_{lang}_{mode}_n{iterations}"
 
     # 1. Save original messages as JSON (with tools for reference)
-    json_path = dump_dir / f"{safe_name}_{mode}.json"
+    json_path = dump_dir / f"{filename_base}.json"
     json_output = {
         "model": config_name,
         "hf_model_id": hf_model_id,
         "mode": mode,
+        "lang": lang,
+        "iterations": iterations,
+        "iter_num": iter_num,
         "timestamp": datetime.now().isoformat(),
         "tools": TOOLS,
         "messages": messages,
@@ -780,23 +805,42 @@ def save_messages_dump(messages: list[dict], config_name: str, hf_model_id: str,
     json_path.write_text(json.dumps(json_output, indent=2, ensure_ascii=False), encoding="utf-8")
 
     # 2. Save decoded tokens with special tokens as txt
-    txt_path = dump_dir / f"{safe_name}_{mode}.txt"
+    txt_path = dump_dir / f"{filename_base}.txt"
 
-    # Convert 'reasoning' -> 'reasoning_content' for tokenizer compatibility
+    # Convert messages for tokenizer compatibility
+    # Different models use different field names for reasoning:
+    # - GLM: reasoning_content
+    # - gpt-oss: thinking
+    is_gpt_oss = "gpt-oss" in hf_model_id.lower()
+    reasoning_field = "thinking" if is_gpt_oss else "reasoning_content"
+
     converted = []
     for msg in messages:
         m = dict(msg)
+        # Convert 'reasoning' to model-specific field name
         if "reasoning" in m:
-            m["reasoning_content"] = m.pop("reasoning")
-        # Remove tool_calls for simpler tokenization (causes template errors)
-        if "tool_calls" in m:
-            # Serialize tool_calls into content for visibility
-            tc_str = "\n".join(
-                f"<tool_call>{tc['function']['name']}({tc['function']['arguments']})</tool_call>"
-                for tc in m["tool_calls"]
-            )
-            m["content"] = (m.get("content") or "") + "\n" + tc_str
-            del m["tool_calls"]
+            m[reasoning_field] = m.pop("reasoning")
+        # Remove extra fields that may cause issues
+        for key in ["refusal", "reasoning_details"]:
+            m.pop(key, None)
+        # Convert tool_calls arguments from string to dict if needed
+        if "tool_calls" in m and m["tool_calls"]:
+            new_tool_calls = []
+            for tc in m["tool_calls"]:
+                tc = dict(tc)
+                if "function" in tc:
+                    tc["function"] = dict(tc["function"])
+                    # Handle None, empty string, or string JSON
+                    args = tc["function"].get("arguments") or "{}"
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except json.JSONDecodeError:
+                            args = {}
+                    # Ensure it's a dict for Jinja templates that call .items()
+                    tc["function"]["arguments"] = args if isinstance(args, dict) else {}
+                new_tool_calls.append(tc)
+            m["tool_calls"] = new_tool_calls
         converted.append(m)
 
     tokenizer = get_tokenizer(hf_model_id)
@@ -808,7 +852,22 @@ def save_messages_dump(messages: list[dict], config_name: str, hf_model_id: str,
         # Decode with special tokens visible
         decoded_text = tokenizer.decode(token_ids, skip_special_tokens=False)
     except Exception as e:
-        decoded_text = f"# ERROR: Failed to apply_chat_template: {e}\n\n# Fallback: raw messages\n{json.dumps(converted, indent=2, ensure_ascii=False)}"
+        # Fallback: manually format messages as readable text
+        lines = []
+        for msg in messages:
+            role = msg.get("role", "unknown")
+            lines.append(f"\n<|{role}|>")
+            if msg.get("reasoning"):
+                lines.append(f"<think>{msg['reasoning']}</think>")
+            if msg.get("content"):
+                lines.append(msg["content"])
+            if msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    f = tc.get("function", {})
+                    lines.append(f"<tool_call>{f.get('name')}({f.get('arguments')})</tool_call>")
+            if msg.get("tool_call_id"):
+                lines.append(f"[tool_call_id: {msg['tool_call_id']}]")
+        decoded_text = f"# NOTE: apply_chat_template failed, using manual format\n# Error: {e}\n" + "\n".join(lines)
 
     header = f"# Model: {config_name}\n# HF: {hf_model_id}\n# Mode: {mode}\n# Tokens: {token_count}\n\n"
     txt_path.write_text(header + decoded_text, encoding="utf-8")
@@ -866,6 +925,7 @@ Examples:
     parser.add_argument("--multi", action="store_true", help="Run multi-turn test only")
     parser.add_argument("--temp", type=float, default=DEFAULT_TEMPERATURE, help="Temperature")
     parser.add_argument("--top-p", type=float, default=DEFAULT_TOP_P, help="Top-p")
+    parser.add_argument("--lang", choices=["en", "ko"], default="en", help="Prompt language (en/ko)")
     parser.add_argument("--list", action="store_true", help="List available models")
     parser.add_argument("--no-save", action="store_true", help="Don't save results to file")
     parser.add_argument("-q", "--quiet", action="store_true", help="Quiet mode (less output)")
@@ -935,6 +995,7 @@ Examples:
                 temperature=args.temp,
                 top_p=args.top_p,
                 verbose=not args.quiet,
+                lang=args.lang,
             )
             single_results.append(result)
             all_results.append(result)
@@ -956,6 +1017,7 @@ Examples:
                 temperature=args.temp,
                 top_p=args.top_p,
                 verbose=not args.quiet,
+                lang=args.lang,
             )
             multi_results.append(result)
             all_results.append(result)

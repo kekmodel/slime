@@ -1,0 +1,24 @@
+# Model: glm4.7-flash:think-off
+# HF: zai-org/GLM-4.7-Flash
+# Mode: multi
+# Tokens: 451
+
+[gMASK]<sop><|system|>
+# Tools
+
+You may call one or more functions to assist with the user query.
+
+You are provided with function signatures within <tools></tools> XML tags:
+<tools>
+{"type": "function", "function": {"name": "get_price", "description": "Get the current price of a product", "parameters": {"type": "object", "properties": {"product": {"type": "string", "description": "Product name"}}, "required": ["product"]}}}
+{"type": "function", "function": {"name": "calculator", "description": "Evaluate a mathematical expression", "parameters": {"type": "object", "properties": {"expression": {"type": "string", "description": "Math expression"}}, "required": ["expression"]}}}
+</tools>
+
+For each function call, output the function name and arguments within the following XML format:
+<tool_call>{function-name}<arg_key>{arg-key-1}</arg_key><arg_value>{arg-value-1}</arg_value><arg_key>{arg-key-2}</arg_key><arg_value>{arg-value-2}</arg_value>...</tool_call><|user|>안녕하세요!<|assistant|></think>안녕하세요! 만나서 반갑습니다. 오늘 어떤 도움이 필요하신가요?<|user|>apple과 banana의 가격을 조회한 후, 계산기 도구를 사용해서 평균 가격을 계산해주세요.<|assistant|></think>Apple과 banana의 가격을 조회한 후 평균 가격을 계산해 드리겠습니다.<tool_call>get_price<arg_key>product</arg_key><arg_value>apple</arg_value></tool_call><tool_call>get_price<arg_key>product</arg_key><arg_value>banana</arg_value></tool_call><|observation|><tool_response>1500</tool_response><tool_response>800</tool_response><|assistant|></think><tool_call>calculator<arg_key>expression</arg_key><arg_value>(1500 + 800) / 2</arg_value></tool_call><|observation|><tool_response>1150.0</tool_response><|assistant|></think>안녕하세요! 
+
+**Apple**의 가격은 **1,500** 원이고, **Banana**의 가격은 **800** 원입니다. 
+
+계산기 도구를 이용해 평균 가격을 계산한 결과는 다음과 같습니다.
+
+**평균 가격: 1,150 원**

@@ -1,0 +1,53 @@
+# Model: glm4.7-flash:think-turn
+# HF: zai-org/GLM-4.7-Flash
+# Mode: multi
+# Tokens: 890
+
+[gMASK]<sop><|system|>
+# Tools
+
+You may call one or more functions to assist with the user query.
+
+You are provided with function signatures within <tools></tools> XML tags:
+<tools>
+{"type": "function", "function": {"name": "get_price", "description": "Get the current price of a product", "parameters": {"type": "object", "properties": {"product": {"type": "string", "description": "Product name"}}, "required": ["product"]}}}
+{"type": "function", "function": {"name": "calculator", "description": "Evaluate a mathematical expression", "parameters": {"type": "object", "properties": {"expression": {"type": "string", "description": "Math expression"}}, "required": ["expression"]}}}
+</tools>
+
+For each function call, output the function name and arguments within the following XML format:
+<tool_call>{function-name}<arg_key>{arg-key-1}</arg_key><arg_value>{arg-value-1}</arg_value><arg_key>{arg-key-2}</arg_key><arg_value>{arg-value-2}</arg_value>...</tool_call><|user|>안녕하세요!<|assistant|></think>안녕하세요! 반갑습니다. 오늘 어떤 일을 도와드릴까요?<|user|>apple과 banana의 가격을 조회한 후, 계산기 도구를 사용해서 평균 가격을 계산해주세요.<|assistant|><think>사용자가 apple과 banana의 가격을 조회한 후, 계산기 도구를 사용해서 평균 가격을 계산하길 원하고 있습니다. 
+
+먼저 apple의 가격을 조회하고, banana의 가격을 조회해야 합니다. 그 후에 두 가격의 평균을 계산해야 합니다.
+
+단계:
+1. get_price 함수를 호출하여 apple의 가격 조회
+2. get_price 함수를 호출하여 banana의 가격 조회
+3. calculator 함수를 사용하여 두 가격의 평균 계산 ( (apple 가격 + banana 가격) / 2 )
+
+먼저 두 제품의 가격을 조회하겠습니다.</think>안녕하세요! apple과 banana의 가격을 먼저 조회한 후 평균 가격을 계산해 드리겠습니다.<tool_call>get_price<arg_key>product</arg_key><arg_value>apple</arg_value></tool_call><tool_call>get_price<arg_key>product</arg_key><arg_value>banana</arg_value></tool_call><|observation|><tool_response>1500</tool_response><tool_response>800</tool_response><|assistant|><think>두 상품의 가격을 조회했습니다:
+- apple: 1500
+- banana: 800
+
+이제 이 평균을 계산해야 합니다. 평균 계산 공식은 (1500 + 800) / 2 = 1150입니다.
+
+calculator 함수를 사용해서 이를 계산해 보겠습니다.</think><tool_call>calculator<arg_key>expression</arg_key><arg_value>(1500 + 800) / 2</arg_value></tool_call><|observation|><tool_response>1150.0</tool_response><|assistant|><think>The user wants me to:
+1.  Query the price of "apple" and "banana".
+2.  Calculate the average price using a calculator tool.
+
+I've already executed the tools:
+-   `get_price` for "apple" returned 1500.
+-   `get_price` for "banana" returned 800.
+-   `calculator` expression `(1500 + 800) / 2` returned 1150.0.
+
+Now I need to present this information to the user in a friendly and clear manner.
+-   State the individual prices.
+-   Show the calculation process (sum divided by 2).
+-   State the final average price.</think>애플의 가격은 **1,500원**이고, 바나나의 가격은 **800원**입니다.
+
+이를 바탕으로 평균 가격을 계산해 보면 다음과 같습니다.
+
+1.  **가격 합계:** 1,500원 + 800원 = 2,300원
+2.  **개수:** 2개
+3.  **평균 가격:** 2,300원 ÷ 2 = **1,150원**
+
+따라서 apple과 banana의 평균 가격은 **1,150원**입니다.

@@ -1,0 +1,56 @@
+# Model: glm4.7-flash:think-turn
+# HF: zai-org/GLM-4.7-Flash
+# Mode: multi
+# Tokens: 852
+
+[gMASK]<sop><|system|>
+# Tools
+
+You may call one or more functions to assist with the user query.
+
+You are provided with function signatures within <tools></tools> XML tags:
+<tools>
+{"type": "function", "function": {"name": "get_price", "description": "Get the current price of a product", "parameters": {"type": "object", "properties": {"product": {"type": "string", "description": "Product name"}}, "required": ["product"]}}}
+{"type": "function", "function": {"name": "calculator", "description": "Evaluate a mathematical expression", "parameters": {"type": "object", "properties": {"expression": {"type": "string", "description": "Math expression"}}, "required": ["expression"]}}}
+</tools>
+
+For each function call, output the function name and arguments within the following XML format:
+<tool_call>{function-name}<arg_key>{arg-key-1}</arg_key><arg_value>{arg-value-1}</arg_value><arg_key>{arg-key-2}</arg_key><arg_value>{arg-value-2}</arg_value>...</tool_call><|user|>안녕하세요!<|assistant|></think>안녕하세요! 오늘 하루는 어떠세요? 어떤 도움이 필요하신가요?<|user|>apple과 banana의 가격을 조회한 후, 계산기 도구를 사용해서 평균 가격을 계산해주세요.<|assistant|><think>사용자가 apple과 banana의 가격을 조회하고, 계산기 도구를 사용해서 평균 가격을 계산해달라고 요청했습니다.
+
+먼저 apple과 banana의 가격을 조회해야 합니다. get_price 함수를 사용해서 각 과일의 가격을 가져와야 합니다.
+
+그리고 계산기 도구를 사용해서 평균 가격을 계산해야 합니다.
+
+먼저 apple의 가격을 조회하고 banana의 가격을 조회한 뒤, 계산기로 평균을 계산하겠습니다.</think>안녕하세요! apple과 banana의 가격을 조회한 후 평균 가격을 계산해 드리겠습니다.<tool_call>get_price<arg_key>product</arg_key><arg_value>apple</arg_value></tool_call><tool_call>get_price<arg_key>product</arg_key><arg_value>banana</arg_value></tool_call><|observation|><tool_response>1500</tool_response><tool_response>800</tool_response><|assistant|><think>좋아요, apple은 1500원, banana은 800원인 것을 확인했습니다. 이제 이 두 가격의 평균을 계산해야 합니다.
+
+평균 = (1500 + 800) / 2 = 2300 / 2 = 1150원
+
+calculator 함수를 사용해서 이 계산을 수행해야 합니다.</think><tool_call>calculator<arg_key>expression</arg_key><arg_value>(1500 + 800) / 2</arg_value></tool_call><|observation|><tool_response>1150.0</tool_response><|assistant|><think>The user asked me to:
+1.  Check the prices of "apple" and "banana".
+2.  Use a calculator tool to calculate the average price.
+
+**Step 1: Get Prices**
+I called `get_price` for "apple" and "banana".
+- Apple price: 1500
+- Banana price: 800
+
+**Step 2: Calculate Average**
+I called `calculator` to compute `(1500 + 800) / 2`.
+- Result: 1150.0
+
+**Step 3: Formulate the Response**
+I need to report the prices retrieved and the calculated average in a clear, polite Korean format.
+- Apple: 1500원
+- Banana: 800원
+- Average: (1500 + 800) / 2 = 1150원
+
+The tone should be helpful and direct.</think>**가격 정보**
+
+*   **Apple:** 1,500원
+*   **Banana:** 800원
+
+**평균 가격 계산**
+
+위 데이터를 사용한 평균 가격 계산 결과는 다음과 같습니다.
+
+(1,500원 + 800원) ÷ 2 = **1,150원**
