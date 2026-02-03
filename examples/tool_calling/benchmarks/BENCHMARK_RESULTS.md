@@ -247,18 +247,7 @@ nemotron3-nano 싱글턴에서 **54,992 토큰** 폭발 사례 발생
 
 더 큰 모델이 더 안정적인 reasoning 출력
 
-### Parallel Tool Calling 지원
-
-| model_id | Parallel | Turn 분포 | 비고 |
-|----------|----------|-----------|------|
-| **glm4.7-flash** | ✅ Yes | 4턴: 30회 (100%) | 완벽한 병렬 |
-| **gpt-oss-120b** | ❌ No | 5턴: 30회 (100%) | 완벽한 순차 |
-| **gpt-oss-20b** | ❌ No | 5턴: 29회, 2턴: 1회 | 순차 |
-| **nemotron3-nano** | ✅ Yes | 4턴 있음 | 병렬 but Acc 80~90%, CV 높음 |
-| **qwen3-30b** | ✅ Yes | 4턴: 7회, 3턴: 2회, 5턴: 1회 | 병렬 but Acc 80% |
-| **qwen3-next-80b** | ✅ Yes | 4턴: 5회, 5턴: 3회, 2턴: 2회 | 병렬 but Acc 80% |
-
-> 동일 model_id는 동일 특성 (예: gpt-oss-120b:low/medium/high 모두 순차)
+> **Parallel 지원 여부**: 벤치마크 결과의 Turns 컬럼으로 확인 가능 (4턴 = 병렬, 5턴 = 순차)
 
 ---
 
