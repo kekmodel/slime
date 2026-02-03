@@ -24,7 +24,7 @@
 
 | 모델 | 문제점 |
 |------|--------|
-| nemotron3-nano | CV 72~249%, Acc 40~90% |
+| nemotron3-nano | CV 72-249%, Acc 40-90% |
 | qwen3-30b | Acc 60% (tool 순서 오류) |
 | qwen3-next-80b | Acc 80%, Latency 8.4s |
 | gpt-oss-20b:high | CV 140% (reasoning 폭발) |
