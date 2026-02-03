@@ -262,6 +262,60 @@ nemotron3-nano 싱글턴에서 **54,992 토큰** 폭발 사례 발생
 
 ---
 
+## 모델 아키텍처 (MoE 스펙)
+
+> 모든 테스트 모델은 MoE (Mixture of Experts) 아키텍처. Latency는 Active 파라미터에 비례.
+
+| 모델 | 총 파라미터 | **Active** | Experts | Top-K | 비율 |
+|------|------------|------------|---------|-------|------|
+| glm4.7-flash | 30B | **3B** | 64 | 4 | 10% |
+| gpt-oss-20b | 21B | **3.6B** | 32 | 4 | 17% |
+| gpt-oss-120b | 117B | **5.1B** | 128 | 4 | 4.3% |
+| qwen3-30b | 30.5B | **3.3B** | 128 | 8 | 10.8% |
+| qwen3-next-80b | 80B | **3.9B** | 512 | 10 | 4.9% |
+
+**핵심**: 총 파라미터가 아닌 **Active 파라미터 (3~5B)** 가 Latency 결정
+
+---
+
+## Latency 예상 순위 (한국어, Acc 100%)
+
+> Active 파라미터가 비슷하므로 **Decode 토큰 수**가 Latency 결정
+
+| 순위 | 모델 | Active | 턴 | Decode 토큰 | 예상 Latency |
+|------|------|--------|-----|-------------|--------------|
+| 1 | gpt-oss-120b:low | 5.1B | 5 | 89 | **~0.7s** 🏆 |
+| 2 | gpt-oss-20b:low | 3.6B | 5 | 93 | ~0.7s |
+| 3 | glm4.7-flash:think-off | 3B | 4 | 172 | ~0.8s |
+| 4 | gpt-oss-20b:medium | 3.6B | 5 | 245 | ~1.2s |
+| 5 | gpt-oss-120b:medium | 5.1B | 5 | 210 | ~1.3s |
+| 6 | gpt-oss-120b:high | 5.1B | 5 | 834 | ~4.7s |
+| 7 | glm4.7-flash:think-turn | 3B | 4 | 973 | ~3.6s |
+| 8 | glm4.7-flash:think-all | 3B | 4 | 1135 | ~4.2s |
+| 9 | gpt-oss-20b:high | 3.6B | 5 | 1937 | ~7.4s |
+
+### Latency 기준 추천
+
+| 용도 | 모델 | Latency | 특징 |
+|------|------|---------|------|
+| **Reasoning 0 필요** | glm4.7-flash:think-off | ~0.8s | 유일한 R=0 + 병렬 🏆 |
+| **최속 + 짧은 R** | gpt-oss-120b:low | ~0.7s | 토큰 최소 (89) |
+| **R 필요 + 병렬** | glm4.7-flash:think-all | ~4.2s | CV 25% 안정 |
+| **R 필요 + 안정** | gpt-oss-120b:high | ~4.7s | CV 19% 최고 안정 |
+
+### think-turn 비추천 이유
+
+| 항목 | think-turn | think-all |
+|------|------------|-----------|
+| CV (안정성) | **51% ⚠️** | 25% ✅ |
+| KV 캐시 | ❌ 삭제됨 | ✅ 유지 |
+| Latency | ~3.6s | ~4.2s |
+
+- think-turn: 매 턴 reasoning 생성 후 삭제 → **KV 캐시 미스**
+- Latency 이점 적고 CV 불안정 → **사용 이유 없음**
+
+---
+
 ## 모델별 API 설정
 
 | Model | API Parameter | 설명 |
