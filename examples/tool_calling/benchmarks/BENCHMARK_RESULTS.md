@@ -262,9 +262,9 @@ nemotron3-nano 싱글턴에서 **54,992 토큰** 폭발 사례 발생
 
 ---
 
-## 모델 아키텍처 (MoE 스펙)
+## 모델 아키텍처
 
-> 모든 테스트 모델은 MoE (Mixture of Experts) 아키텍처. Latency는 Active 파라미터에 비례.
+### MoE (Mixture of Experts) 모델
 
 | 모델 | 총 파라미터 | **Active** | Experts | Top-K | MTP/Eagle |
 |------|------------|------------|---------|-------|-----------|
@@ -274,39 +274,61 @@ nemotron3-nano 싱글턴에서 **54,992 토큰** 폭발 사례 발생
 | qwen3-30b | 30.5B | **3.3B** | 128 | 8 | ❌ |
 | qwen3-next-80b | 80B | **3.9B** | 512 | 10 | ✅ |
 
+### Mamba (SSM) 모델
+
+| 모델 | 아키텍처 | 특징 |
+|------|----------|------|
+| nemotron3-nano | Mamba | RNN 계열, KV 캐시 없음, Decode 빠름 |
+
 **핵심**:
-- 총 파라미터가 아닌 **Active 파라미터 (3~5B)** 가 Latency 결정
-- **MTP/Eagle 지원**: glm4.7-flash, qwen3-next-80b → Speculative Decoding으로 추가 속도 향상 가능
+- MoE: 총 파라미터가 아닌 **Active 파라미터 (3~5B)** 가 Latency 결정
+- Mamba: Transformer 대비 **Decode 속도 빠름** (O(1) 메모리)
+- **MTP/Eagle 지원**: glm4.7-flash, qwen3-next-80b → Speculative Decoding으로 추가 속도 향상
 
 ---
 
-## Latency 예상 순위 (한국어, Acc 100%)
+## Latency 예상 순위 (한국어)
 
-> Active 파라미터가 비슷하므로 **Decode 토큰 수**가 Latency 결정
-> MTP/Eagle 지원 모델은 Speculative Decoding으로 **2~3배 추가 속도 향상** 가능
+> RTT 무시, 순수 Decode 시간만 계산
+> MTP Accept Rate ~55% 가정 (÷1.55 속도 향상)
 
-| 순위 | 모델 | Active | 턴 | Decode 토큰 | MTP | 예상 Latency |
-|------|------|--------|-----|-------------|-----|--------------|
-| 1 | **glm4.7-flash:think-off** | 3B | 4 | 172 | ✅ | **~0.5s** 🏆 |
-| 2 | gpt-oss-120b:low | 5.1B | 5 | 89 | ❌ | ~0.7s |
-| 3 | gpt-oss-20b:low | 3.6B | 5 | 93 | ❌ | ~0.7s |
-| 4 | gpt-oss-20b:medium | 3.6B | 5 | 245 | ❌ | ~1.2s |
-| 5 | gpt-oss-120b:medium | 5.1B | 5 | 210 | ❌ | ~1.3s |
-| 6 | **glm4.7-flash:think-turn** | 3B | 4 | 973 | ✅ | ~2.3s |
-| 7 | **glm4.7-flash:think-all** | 3B | 4 | 1135 | ✅ | ~2.7s |
-| 8 | gpt-oss-120b:high | 5.1B | 5 | 834 | ❌ | ~4.7s |
-| 9 | gpt-oss-20b:high | 3.6B | 5 | 1937 | ❌ | ~7.4s |
+### TPS 가정
 
-> MTP 지원 모델: 예상 Latency = 기본 Latency ÷ 1.55 (Speculative Decoding, Accept Rate ~55%)
+| 모델 | Active | TPS | 비고 |
+|------|--------|-----|------|
+| nemotron3-nano | - | 400 | Mamba (Decode 빠름) |
+| glm4.7-flash | 3B | 300 | MoE + MTP |
+| qwen3-30b | 3.3B | 280 | MoE |
+| gpt-oss-20b | 3.6B | 250 | MoE |
+| qwen3-next-80b | 3.9B | 230 | MoE + MTP |
+| gpt-oss-120b | 5.1B | 180 | MoE |
 
-### Latency 기준 추천
+### 전체 모델 Latency 순위
+
+| 순위 | 모델 | Decode 토큰 | MTP | 예상 Latency | Acc | 추천 |
+|------|------|-------------|-----|--------------|-----|------|
+| 1 | nemotron3-nano:think-off | 91 | ❌ | ~0.2s | **40%** ❌ | ❌ |
+| 2 | gpt-oss-20b:low | 93 | ❌ | **~0.4s** | 100% ✅ | ✅ |
+| 2 | **glm4.7-flash:think-off** | 172 | ✅ | **~0.4s** | 100% ✅ | 🏆 |
+| 4 | gpt-oss-120b:low | 89 | ❌ | ~0.5s | 100% ✅ | ✅ |
+| 5 | gpt-oss-20b:medium | 245 | ❌ | ~1.0s | 100% ✅ | ✅ |
+| 6 | gpt-oss-120b:medium | 210 | ❌ | ~1.2s | 100% ✅ | ✅ |
+| 7 | glm4.7-flash:think-turn | 973 | ✅ | ~2.1s | 100% ✅ | ⚠️ |
+| 8 | **glm4.7-flash:think-all** | 1135 | ✅ | **~2.4s** | 100% ✅ | ✅ |
+| 9 | qwen3-30b | 802 | ❌ | ~2.9s | **60%** ❌ | ❌ |
+| 10 | gpt-oss-120b:high | 834 | ❌ | ~4.6s | 100% ✅ | ✅ |
+| 11 | qwen3-next-80b | 2994 | ✅ | ~5.4s | **80%** ⚠️ | ❌ |
+| 12 | nemotron3-nano | 2474 | ❌ | ~6.2s | 90% ⚠️ | ❌ |
+| 13 | gpt-oss-20b:high | 1937 | ❌ | ~7.8s | 100% ✅ | ✅ |
+
+### Latency 기준 추천 (Acc 100%)
 
 | 용도 | 모델 | Latency | 특징 |
 |------|------|---------|------|
-| **최속 (R=0)** | glm4.7-flash:think-off | **~0.5s** | MTP + 병렬 + R=0 🏆 |
-| **최속 (짧은 R)** | gpt-oss-120b:low | ~0.7s | 토큰 최소 (89), MTP 없음 |
-| **R 필요 + 최속** | glm4.7-flash:think-all | **~2.7s** | MTP + 병렬 + CV 25% |
-| **R 필요 + 안정** | gpt-oss-120b:high | ~4.7s | CV 19% 최고 안정, MTP 없음 |
+| **최속 (R=0)** | glm4.7-flash:think-off | **~0.4s** | MTP + 병렬 + R=0 🏆 |
+| **최속 (짧은 R)** | gpt-oss-20b:low | ~0.4s | 토큰 최소 (93) |
+| **R 필요 + 최속** | glm4.7-flash:think-all | **~2.4s** | MTP + 병렬 + CV 25% |
+| **R 필요 + 안정** | gpt-oss-120b:high | ~4.6s | CV 19% 최고 안정 |
 
 ### think-turn 비추천 이유
 
@@ -314,10 +336,19 @@ nemotron3-nano 싱글턴에서 **54,992 토큰** 폭발 사례 발생
 |------|------------|-----------|
 | CV (안정성) | **51% ⚠️** | 25% ✅ |
 | KV 캐시 | ❌ 삭제됨 | ✅ 유지 |
-| Latency | ~3.6s | ~4.2s |
+| Latency | ~2.1s | ~2.4s |
 
 - think-turn: 매 턴 reasoning 생성 후 삭제 → **KV 캐시 미스**
 - Latency 이점 적고 CV 불안정 → **사용 이유 없음**
+
+### Acc < 100% 모델 비추천 이유
+
+| 모델 | Acc | 문제점 |
+|------|-----|--------|
+| nemotron3-nano:think-off | 40% | Tool 미사용 빈번 |
+| qwen3-30b | 60% | Tool 순서 오류 |
+| qwen3-next-80b | 80% | MTP 있어도 Acc 낮음 |
+| nemotron3-nano | 90% | CV 72% 불안정 |
 
 ---
 
