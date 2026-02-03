@@ -1,0 +1,133 @@
+# Model: qwen3-next-80b
+# HF: Qwen/Qwen3-Next-80B-A3B-Thinking
+# Mode: multi
+# Tokens: 1766
+
+<|im_start|>system
+# Tools
+
+You may call one or more functions to assist with the user query.
+
+You are provided with function signatures within <tools></tools> XML tags:
+<tools>
+{"type": "function", "function": {"name": "get_price", "description": "Get the current price of a product", "parameters": {"type": "object", "properties": {"product": {"type": "string", "description": "Product name"}}, "required": ["product"]}}}
+{"type": "function", "function": {"name": "calculator", "description": "Evaluate a mathematical expression", "parameters": {"type": "object", "properties": {"expression": {"type": "string", "description": "Math expression"}}, "required": ["expression"]}}}
+</tools>
+
+For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
+<tool_call>
+{"name": <function-name>, "arguments": <args-json-object>}
+</tool_call><|im_end|>
+<|im_start|>user
+안녕하세요!<|im_end|>
+<|im_start|>assistant
+안녕하세요! 😊 어떻게 도와드릴까요?<|im_end|>
+<|im_start|>user
+apple과 banana의 가격을 조회한 후, 계산기 도구를 사용해서 평균 가격을 계산해주세요.<|im_end|>
+<|im_start|>assistant
+<think>
+Okay, the user wants the prices of apple and banana, then calculate their average using the calculator tool. Let me see.
+
+First, I need to call get_price for both products. So, two separate calls. Wait, the get_price function takes a product name. So for apple and banana, I need to make two function calls.
+
+Wait, but the user said "apple과 banana의 가격을 조회한 후", which means get price for both. So I need to call get_price twice: once for 'apple', once for 'banana'.
+
+Then, once I have both prices, I need to calculate the average. So average = (price_apple + price_banana) / 2. But the calculator tool requires an expression. So I need to take the two prices, add them, divide by 2. But first, I need to get the prices first.
+
+Wait, but the assistant can't actually get the prices yet; it has to call the tools. So the steps are:
+
+1. Call get_price with product "apple".
+2. Call get_price with product "banana".
+3. Then, take the results from those two calls, compute the average using the calculator function.
+
+But the problem is, the assistant can't do multiple tool calls in one go? Wait, the user might expect that the assistant will make two separate tool calls. So in the response, the assistant should first make the two get_price calls, then, after receiving the prices, proceed to call calculator.
+
+But in the current setup, the assistant has to output each tool call step by step. Wait, but the way the tools work is that for each tool call, the assistant generates a tool_call, then waits for the response. So for this query, the assistant should first generate two tool calls: one for apple, one for banana.
+
+Wait, but the user said "apple과 banana의 가격을 조회한 후, 계산기 도구를 사용해서 평균 가격을 계산해주세요." So the correct sequence is:
+
+- Get price of apple.
+
+- Get price of banana.
+
+- Then compute average.
+
+So the assistant needs to first make two get_price calls. So in the response, I should have two tool_call entries.
+
+So in the response, I need to output two tool_call XMLs, one for each product.
+
+Wait, but how does the system handle multiple tool calls? Typically, the assistant can make multiple tool calls in sequence, each in separate tool_call tags. So for the first step, the assistant says:
+
+<tool_call>
+{"name": "get_price", "arguments": {"product": "apple"}}
+</tool_call>
+
+<tool_call>
+{"name": "get_price", "arguments": {"product": "banana"}}
+</tool_call>
+
+Then, after receiving the prices (but the assistant can't know those yet, as it's the next step), then calculate the average.
+
+But in this case, the current step is just to generate the tool calls for getting the prices. Because the assistant can't proceed to calculator until the prices are known.
+
+So the correct approach is to call get_price for both products first. So the assistant should output two tool calls for get_price.
+
+Yes. So first, call get_price for apple, then for banana.
+
+So the response should have two tool_call blocks, each with the respective product.
+
+Then, after that, the system would provide the prices, and then the assistant can compute the average.
+
+So for now, the next step is to generate those two get_price calls.
+
+Therefore, the assistant's first response should be to make both get_price calls.
+</think>
+
+<tool_call>
+{"name": "get_price", "arguments": {"product": "apple"}}
+</tool_call>
+<tool_call>
+{"name": "get_price", "arguments": {"product": "banana"}}
+</tool_call><|im_end|>
+<|im_start|>user
+<tool_response>
+1500
+</tool_response>
+<tool_response>
+800
+</tool_response><|im_end|>
+<|im_start|>assistant
+<think>
+Okay, let me figure out how to handle this. The user asked for the prices of apple and banana, then to calculate the average using the calculator tool.
+
+First, I called get_price for apple and got 1500. Then for banana, got 800. Now I need to find the average. The average would be (1500 + 800) divided by 2. So 2300 divided by 2 is 1150.
+
+Wait, but the calculator tool takes an expression. So I should call calculator with " (1500 + 800) / 2 " or maybe just "1500+800/2" but order of operations. No, better to do (1500 + 800) / 2 to be safe.
+
+So the expression should be (1500 + 800) / 2. Let me check: 1500 +800 is 2300, divided by 2 is 1150. Correct.
+
+So the next step is to call the calculator function with that expression. Then return the result to the user.
+
+So the tool call would be {"name": "calculator", "arguments": {"expression": "(1500 + 800) / 2"}}.
+
+Yes, that's right. Then once the calculator returns 1150, I can tell the user the average is 1150.
+</think>
+
+<tool_call>
+{"name": "calculator", "arguments": {"expression": "(1500 + 800) / 2"}}
+</tool_call><|im_end|>
+<|im_start|>user
+<tool_response>
+1150.0
+</tool_response><|im_end|>
+<|im_start|>assistant
+<think>
+Okay, let's see. The user asked for the prices of apple and banana, then to calculate the average using a calculator tool.
+
+First, I need to check the prices. I called the get_price function for apple and got 1500. Then for banana, got 800. Now, to find the average, add them together and divide by 2. So (1500 + 800) = 2300, divided by 2 is 1150.0. The calculator tool returned that. So the average price is 1150.0. Now I should present this to the user clearly.
+
+Wait, let me confirm the steps again. Yes, apple is 1500, banana 800. Sum is 2300. Divide by 2 gives 1150. So the answer is 1150.0. The user might expect a simple answer like "Apple의 가격은 1500원, Banana의 가격은 800원입니다. 평균 가격은 1150원입니다." in Korean. Let me make sure there are no mistakes. Yeah, that's correct. So the final answer is 1150.
+</think>
+
+Apple의 가격은 1,500원, Banana의 가격은 800원입니다.  
+평균 가격은 **1,150원**입니다. 😊<|im_end|>

@@ -1,0 +1,170 @@
+# Model: nemotron3-nano
+# HF: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16
+# Mode: multi
+# Tokens: 2654
+
+<|im_start|>system
+# Tools
+
+You have access to the following functions:
+
+<tools>
+<function>
+<name>get_price</name>
+<description>Get the current price of a product</description>
+<parameters>
+<parameter>
+<name>product</name>
+<type>string</type>
+<description>Product name</description>
+</parameter>
+<required>["product"]</required>
+</parameters>
+</function>
+<function>
+<name>calculator</name>
+<description>Evaluate a mathematical expression</description>
+<parameters>
+<parameter>
+<name>expression</name>
+<type>string</type>
+<description>Math expression</description>
+</parameter>
+<required>["expression"]</required>
+</parameters>
+</function>
+</tools>
+
+If you choose to call a function ONLY reply in the following format with NO suffix:
+
+<tool_call>
+<function=example_function_name>
+<parameter=example_parameter_1>
+value_1
+</parameter>
+<parameter=example_parameter_2>
+This is the value for the second parameter
+that can span
+multiple lines
+</parameter>
+</function>
+</tool_call>
+
+<IMPORTANT>
+Reminder:
+- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags
+- Required parameters MUST be specified
+- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after
+- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls
+</IMPORTANT><|im_end|>
+<|im_start|>user
+안녕하세요!<|im_end|>
+<|im_start|>assistant
+<think></think>
+안녕하세요! 기분 좋은 인사 주셨네요. 오늘도 여러분을 위해 도움이 될 만한 이야기를 나눠드릴 준비가 되어 있습니다. 궁금한 점이나 나누고 싶은 이야기가 있으면 언제든지 말씀해주세요! 😊<|im_end|>
+<|im_start|>user
+apple과 banana의 가격을 조회한 후, 계산기 도구를 사용해서 평균 가격을 계산해주세요.<|im_end|>
+<|im_start|>assistant
+<think>
+The user wants to get the price of "apple" and "banana" then calculate the average price using the calculator tool. There is a get_price tool and a calculator tool. Steps:
+
+1. Use get_price with product "apple" to get price.
+2. Use get_price with product "banana" to get price.
+3. Use calculator tool with expression "price_apple + price_banana / 2"? Actually average = (price_apple + price_banana)/2. So expression: "(price_apple + price_banana)/2". But calculator probably expects numeric expression; we need to substitute actual numbers after retrieving. The tool's parameter is an expression string; we need to pass a numeric expression. However we don't have numeric values yet; we need to retrieve them via get_price calls first. Then use those values to form the average expression.
+
+Thus we need to call get_price for "apple", then get_price for "banana". Then take results and compute average. The calculator tool can compute expression; we can pass an expression like "5+7" if we have numbers. But we might need to construct expression dynamically. However we can't combine results directly within a tool call; we need to fetch each price separately, maybe store in variables? The system does not specify variable storage. Perhaps we can call get_price for each product in separate steps, retrieving price values, then use calculator with expression containing those numeric values.
+
+But can we pass placeholders? The calculator expects an expression, presumably a string that can be evaluated. We can't directly embed variables from prior calls. However we could do something like first call get_price for "apple", get result; then call get_price for "banana", get result; then call calculator with expression "({apple_price}+{banana_price})/2"? But that would be literal strings, not actual numbers.
+
+But maybe the tool's implementation can substitute variables? Probably not. However the instructions: "You may call one or more functions to assist with the user query." So we can call get_price twice to retrieve the prices, then use calculator to compute average using those numeric values. But we need to embed the numbers into the expression.
+
+One approach: Use get_price for "apple" => let's call it "price_apple". Then get_price for "banana" => "price_banana". Then we can compute average = (price_apple + price_banana)/2. Since calculator takes a string expression, we could do something like " (value1 + value2) / 2 " where we replace value1 and value2 with the retrieved numbers. But we need to pass a string literal. We can do something like call calculator with expression "5+7" if we got numeric responses. But the user didn't specify actual numbers; they want us to compute it. So we will do sequential calls:
+
+First get_price product "apple". We'll get a numeric response.
+
+Second get_price product "banana". Then we have two numbers. Then we can call calculator with expression "(price_apple + price_banana)/2"? But we need actual numbers; we can embed them after receiving responses. Since the system might allow interpolation of previous function outputs into the next function's arguments? Not explicit. Usually we can just call calculator with expression using the numbers we got. So step 1: get_price apple => result maybe "2.5". Step 2: get_price banana => maybe "1.0". Then we can compute "(2.5 + 1.0) / 2". That yields 1.75.
+
+Thus the appropriate tool calls: 1) get_price product: "apple". 2) get_price product: "banana". 3) calculator expression: "(apple_price + banana_price) / 2"? But we need actual numbers, not placeholders.
+
+But perhaps we can combine steps: We can call calculator directly with expression "(get_price('apple') + get_price('banana')) / 2"? But the calculator expects an expression string; it might evaluate it directly using external functions? Probably not; it's just a math expression evaluator. It can't call get_price.
+
+Thus we need to fetch prices then calculate.
+
+Thus we can do:
+
+- First call get_price with product "apple". Then note result in some variable? The system might allow returning the result to us. Then we call get_price for banana, then call calculator with expression formed by those results.
+
+Given we can't store variables, but we can combine calls sequentially: We can call get_price for apple, then get_price for banana; after we have both results, we can call calculator with expression that uses those numbers. But how do we reference them? Possibly we can in the third call to calculator use an expression referencing the two previous results by their return values? The system might support referencing previous function outputs with placeholders like "{{function_output_1}}"? Not specified. However typical scenario: The assistant can call functions sequentially and use the outputs to form new calls. It can store outputs in its context, but not in user-provided variables. It might be able to refer to them by using placeholder like "result1"? Usually they are not exposed; but the assistant can embed the numeric results directly into the calculator expression by retrieving them first. So the plan: call get_price for apple, capture price. Then call get_price for banana, capture price. Then call calculator with expression "({apple_price}+{banana_price})/2". But we need to replace placeholders with actual numbers. So after receiving the first response, we know price_apple. Then after second response, we know price_banana. Then we can construct expression like "(<price_apple> + <price_banana>)/2". Then call calculator with that expression.
+
+Thus step-by-step:
+
+- Call get_price product "apple". Let’s do it.
+
+
+
+</think>
+<tool_call>
+<function=get_price>
+<parameter=product>
+apple
+</parameter>
+</function>
+</tool_call>
+<|im_end|>
+<|im_start|>user
+<tool_response>
+1500
+</tool_response>
+<|im_end|>
+<|im_start|>assistant
+<think>
+Okay, the user wants me to find the price of apple and banana, then calculate the average using the calculator tool. I already got the price of apple as 1500 from the first tool call. Now I need to get the price of banana. Let me call get_price again for banana.
+
+Wait, but looking back, the user mentioned both apple and banana. The first tool call was for apple, and the response was 1500. Now I need to get banana's price. Let me check if the tool allows multiple product queries. The get_price tool takes a single product parameter, so I need to call it again with banana as the product. 
+
+So the next step is to call get_price with "banana" as the argument. Once I have both prices, I can use the calculator tool to compute the average. The average would be (apple_price + banana_price) divided by 2. Then I'll use the calculator tool with that expression to get the result. Let me make sure I structure the tool calls correctly. First, get banana's price, then perform the calculation.
+
+</think>
+<tool_call>
+<function=get_price>
+<parameter=product>
+banana
+</parameter>
+</function>
+</tool_call>
+<|im_end|>
+<|im_start|>user
+<tool_response>
+800
+</tool_response>
+<|im_end|>
+<|im_start|>assistant
+<think>
+Okay, the user wants the average price of apple and banana. I first called get_price for "apple" and got 1500. Then I called it for "banana" and got 800. Now I need to calculate the average. The calculator tool can do that. The formula is (1500 + 800) divided by 2. So I'll use the calculator with the expression "1500 + 800 / 2". Wait, no, the user said average, which is (price_apple + price_banana) divided by 2. So the correct expression should be "(1500 + 800) / 2". But the calculator's parameters require an expression. So I need to format it as "(1500 + 800) / 2" to get the correct average. Let me check if the calculator can handle parentheses. The tool's description says it evaluates a mathematical expression, so parentheses should work. Let me make sure the parameters are correct. The expression should be "(1500 + 800) / 2". But maybe the tool expects a string without spaces? The example in the tool's parameters just shows "expression" as a string. So I can pass the expression as "(1500 + 800) / 2". That should give the average. Let me make sure I'm not missing anything. The user asked to use the calculator tool to compute the average after getting the prices. So the next step is to call the calculator with that expression.
+
+</think>
+<tool_call>
+<function=calculator>
+<parameter=expression>
+(1500 + 800) / 2
+</parameter>
+</function>
+</tool_call>
+<|im_end|>
+<|im_start|>user
+<tool_response>
+1150.0
+</tool_response>
+<|im_end|>
+<|im_start|>assistant
+<think>
+Okay, let's see. The user asked for the average price of apples and bananas. First, I needed to get the prices for both products. I used the get_price tool for "apple" and got 1500. Then I called it again for "banana" and got 800. Now, I need to calculate the average. The formula for the average of two numbers is (a + b)/2. So adding 1500 and 800 gives 2300, divided by 2 is 1150. I should use the calculator tool to make sure it's accurate. The calculator response came back as 1150.0, so that's correct. The final answer should be 1150. Let me check if there's anything else. The user wanted the average price, so 1150 is the result. I should present it clearly.
+
+</think>
+The average price of apple and banana is **1150**. 
+
+- Apple price: 1500  
+- Banana price: 800  
+- Average: (1500 + 800) / 2 = **1150**  
+
+Let me know if you need further assistance! 😊<|im_end|>

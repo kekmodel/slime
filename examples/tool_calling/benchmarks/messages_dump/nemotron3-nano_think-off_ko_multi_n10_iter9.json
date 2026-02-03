@@ -1,0 +1,129 @@
+{
+  "model": "nemotron3-nano:think-off",
+  "hf_model_id": "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16",
+  "mode": "multi",
+  "lang": "ko",
+  "iterations": 10,
+  "iter_num": 9,
+  "timestamp": "2026-02-03T13:15:23.105992",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_price",
+        "description": "Get the current price of a product",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "product": {
+              "type": "string",
+              "description": "Product name"
+            }
+          },
+          "required": [
+            "product"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calculator",
+        "description": "Evaluate a mathematical expression",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "Math expression"
+            }
+          },
+          "required": [
+            "expression"
+          ]
+        }
+      }
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": "안녕하세요!"
+    },
+    {
+      "role": "assistant",
+      "content": "안녕하세요! 😊  \n이제부터는 어떤 도움이 필요하신지 말씀해 주세요.  \n질문이든, 도움이 필요하든, 그냥 대화도 괜찮아요.  \n어떻게 도와드릴까요?",
+      "refusal": null,
+      "reasoning": null
+    },
+    {
+      "role": "user",
+      "content": "apple과 banana의 가격을 조회한 후, 계산기 도구를 사용해서 평균 가격을 계산해주세요."
+    },
+    {
+      "role": "assistant",
+      "content": "\n\n\n",
+      "refusal": null,
+      "reasoning": null,
+      "tool_calls": [
+        {
+          "type": "function",
+          "index": 0,
+          "id": "call_fe511fb4a5032c10",
+          "function": {
+            "name": "get_price",
+            "arguments": "{\"product\": \"apple\"}"
+          }
+        },
+        {
+          "type": "function",
+          "index": 1,
+          "id": "call_6f6f78e1751a4afb",
+          "function": {
+            "name": "get_price",
+            "arguments": "{\"product\": \"banana\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_fe511fb4a5032c10",
+      "content": "1500"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_6f6f78e1751a4afb",
+      "content": "800"
+    },
+    {
+      "role": "assistant",
+      "content": "\n\n",
+      "refusal": null,
+      "reasoning": null,
+      "tool_calls": [
+        {
+          "type": "function",
+          "index": 0,
+          "id": "call_a728246fbcb026a7",
+          "function": {
+            "name": "calculator",
+            "arguments": "{\"expression\": \"(1500 + 800) / 2\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_a728246fbcb026a7",
+      "content": "1150.0"
+    },
+    {
+      "role": "assistant",
+      "content": "사과의 가격은 1500원, 바나나의 가격은 800원입니다.  \n두 과일의 평균 가격은 **1150.0원**입니다. 🍎🍌",
+      "refusal": null,
+      "reasoning": null
+    }
+  ]
+}

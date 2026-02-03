@@ -1,0 +1,153 @@
+# Model: nemotron3-nano
+# HF: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16
+# Mode: multi
+# Tokens: 1552
+
+<|im_start|>system
+# Tools
+
+You have access to the following functions:
+
+<tools>
+<function>
+<name>get_price</name>
+<description>Get the current price of a product</description>
+<parameters>
+<parameter>
+<name>product</name>
+<type>string</type>
+<description>Product name</description>
+</parameter>
+<required>["product"]</required>
+</parameters>
+</function>
+<function>
+<name>calculator</name>
+<description>Evaluate a mathematical expression</description>
+<parameters>
+<parameter>
+<name>expression</name>
+<type>string</type>
+<description>Math expression</description>
+</parameter>
+<required>["expression"]</required>
+</parameters>
+</function>
+</tools>
+
+If you choose to call a function ONLY reply in the following format with NO suffix:
+
+<tool_call>
+<function=example_function_name>
+<parameter=example_parameter_1>
+value_1
+</parameter>
+<parameter=example_parameter_2>
+This is the value for the second parameter
+that can span
+multiple lines
+</parameter>
+</function>
+</tool_call>
+
+<IMPORTANT>
+Reminder:
+- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags
+- Required parameters MUST be specified
+- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after
+- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls
+</IMPORTANT><|im_end|>
+<|im_start|>user
+안녕하세요!<|im_end|>
+<|im_start|>assistant
+<think></think>
+안녕하세요! 😊  
+오늘은 어떤 도움이 필요하신가요? 궁금한 점이 있으면 언제든지 물어보세요!<|im_end|>
+<|im_start|>user
+apple과 banana의 가격을 조회한 후, 계산기 도구를 사용해서 평균 가격을 계산해주세요.<|im_end|>
+<|im_start|>assistant
+<think>
+The user wants: "apple과 banana의 가격을 조회한 후, 계산기 도구를 사용해서 평균 가격을 계산해주세요."
+
+So they want to get the current price of product "apple" and "banana" using get_price tool, then compute average price using calculator tool. We need to call get_price for apple and banana individually, then use calculator to compute the average (sum divided by 2). Possibly we can calculate manually, but they want to use calculator tool. So we need to first get price of apple, price of banana. Let's call get_price for each.
+
+But we can call get_price only with product name parameter. Likely returns a numeric price. Not sure format. We'll need to store values and then calculate.
+
+Thus steps: 
+1. Call get_price(product="apple")
+2. Call get_price(product="banana")
+3. Use calculator to compute (price_apple + price_banana) / 2.
+
+We need to output tool calls one at a time? The instruction says "You may call one or more functions to assist with the user query." Usually we can call multiple functions in separate tool calls, but each tool call must be separate. We can combine maybe? The calculator tool expects an expression. We could compute average after obtaining both prices, but we need the numeric values.
+
+Thus first call get_price for apple. Then get_price for banana. Then use calculator with expression like "(apple_price + banana_price) / 2". But we need the actual numbers. Since we can't embed variable names directly; we need to pass the numbers we got. But we can do it in one go by chaining? Possibly we can do a single calculator expression using placeholder? No, we need actual numbers.
+
+Thus we need to do sequential calls: get_price apple => result maybe like 1.20. Then we store that value; next call get_price banana => maybe 0.80. Then we can compute average using calculator with expression "1.20 + 0.80 / 2"? Wait parentheses needed. But we can do (1.20 + 0.80) / 2.
+
+But the calculator tool expects an expression string. So we can pass expression "(1.20 + 0.80) / 2". That will compute average.
+
+Thus we need to get numeric values. Let's call get_price for apple.
+
+</think>
+<tool_call>
+<function=get_price>
+<parameter=product>
+apple
+</parameter>
+</function>
+</tool_call>
+<|im_end|>
+<|im_start|>user
+<tool_response>
+1500
+</tool_response>
+<|im_end|>
+<|im_start|>assistant
+<think>
+Okay, the user wants the average price of apple and banana. I already got the price of apple as 1500. Now I need the price of banana. Let me call get_price again for banana.
+
+</think>
+<tool_call>
+<function=get_price>
+<parameter=product>
+banana
+</parameter>
+</function>
+</tool_call>
+<|im_end|>
+<|im_start|>user
+<tool_response>
+800
+</tool_response>
+<|im_end|>
+<|im_start|>assistant
+<think>
+Okay, let's see. The user wants the average price of apple and banana. They already asked for the prices, and I got them: 1500 for apple and 800 for banana.
+
+Now, I need to calculate the average. The calculator tool can do that. The formula is (1500 + 800) divided by 2. Let me check if I can use the calculator function here. The parameters require an expression, so I should input "1500 + 800" divided by 2. Wait, how to format the expression? Maybe write it as "(1500 + 800) / 2" to ensure the calculator does the division last. That should give the correct average. Let me make sure the syntax is right. Yes, the calculator tool should handle that. So the expression is (1500 + 800)/2. Let me call the calculator with that expression.
+
+</think>
+<tool_call>
+<function=calculator>
+<parameter=expression>
+(1500 + 800) / 2
+</parameter>
+</function>
+</tool_call>
+<|im_end|>
+<|im_start|>user
+<tool_response>
+1150.0
+</tool_response>
+<|im_end|>
+<|im_start|>assistant
+<think>
+Okay, let's see. The user asked for the average price of apple and banana after checking their prices. First, I used the get_price tool for both products. Apple came out to 1500 and banana to 800. Then I used the calculator tool to add them and divide by 2. The result is 1150.0. Now I need to present this answer clearly. I should mention the prices of each fruit first, then the calculation steps, and finally the average. Make sure it's easy to understand and friendly. Let me check if there's anything else the user might need. Maybe they want more details or another calculation? But since they just asked for the average, this should be sufficient.
+
+</think>
+The price of apple is 1500 and banana is 800. 
+
+Using the calculator tool, the average price is calculated as follows:  
+(1500 + 800) / 2 = **1150.0**  
+
+Let me know if you need further assistance! 😊<|im_end|>

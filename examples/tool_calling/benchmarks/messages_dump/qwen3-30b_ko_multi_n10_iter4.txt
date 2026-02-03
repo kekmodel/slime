@@ -1,0 +1,70 @@
+# Model: qwen3-30b
+# HF: Qwen/Qwen3-30B-A3B
+# Mode: multi
+# Tokens: 950
+
+<|im_start|>system
+# Tools
+
+You may call one or more functions to assist with the user query.
+
+You are provided with function signatures within <tools></tools> XML tags:
+<tools>
+{"type": "function", "function": {"name": "get_price", "description": "Get the current price of a product", "parameters": {"type": "object", "properties": {"product": {"type": "string", "description": "Product name"}}, "required": ["product"]}}}
+{"type": "function", "function": {"name": "calculator", "description": "Evaluate a mathematical expression", "parameters": {"type": "object", "properties": {"expression": {"type": "string", "description": "Math expression"}}, "required": ["expression"]}}}
+</tools>
+
+For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
+<tool_call>
+{"name": <function-name>, "arguments": <args-json-object>}
+</tool_call><|im_end|>
+<|im_start|>user
+안녕하세요!<|im_end|>
+<|im_start|>assistant
+안녕하세요! 도와드릴 수 있는 게 있나요? 😊<|im_end|>
+<|im_start|>user
+apple과 banana의 가격을 조회한 후, 계산기 도구를 사용해서 평균 가격을 계산해주세요.<|im_end|>
+<|im_start|>assistant
+<think>
+Okay, the user wants to know the prices of apple and banana and then calculate their average. Let me start by calling the get_price function for each product. First, I'll get the price of apple. Then, I'll get the price of banana. Once I have both prices, I can use the calculator function to add them together and divide by 2. But I need to make sure I have the correct values from the first two calls. Let me structure the tool calls step by step.
+</think>
+
+<tool_call>
+{"name": "get_price", "arguments": {"product": "apple"}}
+</tool_call>
+<tool_call>
+{"name": "get_price", "arguments": {"product": "banana"}}
+</tool_call><|im_end|>
+<|im_start|>user
+<tool_response>
+1500
+</tool_response>
+<tool_response>
+800
+</tool_response><|im_end|>
+<|im_start|>assistant
+<think>
+Okay, the user asked for the prices of apple and banana, and I used the get_price function for both. Apple is 1500 and banana is 800. Now they want the average of these two prices. I need to calculate that.
+
+First, I'll add 1500 and 800. 1500 + 800 equals 2300. Then divide by 2. 2300 / 2 is 1150. So the average is 1150. I should use the calculator function to confirm this. The expression would be (1500 + 800) / 2. Let me make sure the parameters are correct. The function requires an expression, so I'll input that. The response from the calculator should give the average, which I can then present to the user.
+</think>
+
+<tool_call>
+{"name": "calculator", "arguments": {"expression": "(1500 + 800) / 2"}}
+</tool_call><|im_end|>
+<|im_start|>user
+<tool_response>
+1150.0
+</tool_response><|im_end|>
+<|im_start|>assistant
+<think>
+Okay, the user asked to check the prices of apple and banana, then use a calculator to find the average. First, I need to get the prices. I called the get_price function for apple and got 1500. Then for banana, I got 800. Now, I have to calculate the average. The formula is (1500 + 800) / 2. Let me add those numbers: 1500 + 800 is 2300. Divided by 2, that's 1150.0. The response from the calculator tool was 1150.0, so the answer is correct. I should present the final answer as 1150.0.
+</think>
+
+apple의 가격은 1500, banana의 가격은 800입니다. 두 과일의 평균 가격은 다음과 같이 계산됩니다:
+
+$$
+\text{평균 가격} = \frac{1500 + 800}{2} = 1150.0
+$$
+
+**결과:** 평균 가격은 1150.0입니다.<|im_end|>
