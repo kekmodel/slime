@@ -41,7 +41,7 @@
    - [멀티턴 (EN)](#멀티턴-tool-calling-benchmark-n10)
    - [멀티턴 (KO)](#멀티턴-tool-calling-benchmark---한국어-n10)
 5. [Key Insights](#key-insights)
-6. [모델별 상세 분석](#모델별-상세-분석)
+6. [Parallel Tool Calling 지원](#parallel-tool-calling-지원)
 7. [API 설정 가이드](#모델별-api-설정)
 8. [컬럼 설명](#컬럼-설명)
 
@@ -222,17 +222,9 @@ nemotron3-nano 싱글턴에서 **54,992 토큰** 폭발 사례 발생
 
 더 큰 모델이 더 안정적인 reasoning 출력
 
-### 4. Parallel Tool Calling의 실질적 의미
-
-병렬 지원 모델이라도 Accuracy가 낮으면 의미 없음:
-- glm4.7-flash: Parallel ✅ + Acc 100% → **실제 사용 가능**
-- qwen3-30b: Parallel ✅ + Acc 80% → **20% 확률로 순서 틀림**
-
 ---
 
-## 모델별 상세 분석
-
-### Parallel Tool Calling 지원
+## Parallel Tool Calling 지원
 
 | model_id | Parallel | Turn 분포 | 비고 |
 |----------|----------|-----------|------|
@@ -244,24 +236,6 @@ nemotron3-nano 싱글턴에서 **54,992 토큰** 폭발 사례 발생
 | **qwen3-next-80b** | ✅ Yes | 4턴: 5회, 5턴: 3회, 2턴: 2회 | 병렬 but Acc 80% |
 
 > 동일 model_id는 동일 특성 (예: gpt-oss-120b:low/medium/high 모두 순차)
-
-### nemotron3-nano 심층 분석
-
-**문제점**:
-1. **think-off 모드**: tool 사용 안 함 (~40% 확률로 직접 텍스트 응답)
-2. **default 모드**: reasoning 폭발 (싱글턴 CV 249%, 최대 54,992 토큰)
-
-**싱글 vs 멀티 비교**:
-
-| Mode | R.Avg | R.Range | R.CV |
-|------|-------|---------|------|
-| Single-turn (EN) | 4,920 | 180~54,992 | 249% ❌ |
-| Multi-turn (EN) | 1,396 | 399~3,202 | 59% ⚠️ |
-| Multi-turn (KO) | 2,391 | 774~6,344 | 72% ❌ |
-
-멀티턴에서 range가 1/17로 줄어듦 (54,992 → 3,202)
-
-**결론**: Tool calling에 부적합. 어떤 모드든 프로덕션 사용 권장하지 않음.
 
 ---
 
