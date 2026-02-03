@@ -218,35 +218,6 @@
 - think-turn: 매 턴 reasoning 생성 후 삭제 → **KV 캐시 미스**
 - Latency 이점 적고 CV 불안정 → **사용 이유 없음**
 
-### Key Insights
-
-#### 1. 멀티턴이 싱글턴보다 안정적
-
-| Model | Single R.CV | Multi R.CV |
-|-------|-------------|------------|
-| nemotron3-nano | 249% ❌ | 59% ⚠️ |
-| gpt-oss-20b:high | 140% ❌ | 45% ⚠️ |
-| qwen3-30b | 89% ❌ | 18% ✅ |
-
-**원인**: 대화 컨텍스트가 모델의 reasoning을 "가이드"
-- 싱글턴: 매번 처음부터 상황 파악 → 불확실성 높음 → 폭발 가능
-- 멀티턴: 이전 턴들이 방향 설정 → reasoning이 bounded됨
-
-#### 2. Reasoning 폭발 현상
-
-nemotron3-nano 싱글턴에서 **54,992 토큰** 폭발 사례 발생
-- 모델이 "길을 잃고" 끝없이 reasoning
-- 비용 예측 불가 → 프로덕션 위험
-
-#### 3. 모델 크기와 안정성
-
-| Model | Size | R.CV (Single) | R.CV (Multi) |
-|-------|------|---------------|--------------|
-| gpt-oss-120b:high | 120B | 49% ⚠️ | 22% ✅ |
-| gpt-oss-20b:high | 20B | 140% ❌ | 45% ⚠️ |
-
-더 큰 모델이 더 안정적인 reasoning 출력
-
 > **Parallel 지원 여부**: 벤치마크 결과의 Turns 컬럼으로 확인 가능 (4턴 = 병렬, 5턴 = 순차)
 
 ---
