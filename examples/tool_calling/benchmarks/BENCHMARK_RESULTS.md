@@ -264,25 +264,19 @@ nemotron3-nano 싱글턴에서 **54,992 토큰** 폭발 사례 발생
 
 ## 모델 아키텍처
 
-### MoE (Mixture of Experts) 모델
+| 모델 | 아키텍처 | 총 파라미터 | **Active** | Experts | Top-K | MTP/Eagle |
+|------|----------|------------|------------|---------|-------|-----------|
+| glm4.7-flash | MoE | 30B | **3B** | 64 | 4 | ✅ |
+| gpt-oss-20b | MoE | 21B | **3.6B** | 32 | 4 | ❌ |
+| nemotron3-nano | **Hybrid Mamba-MoE** | 30B | **3.5B** | 128+1 | 5 | ❌ |
+| qwen3-30b | MoE | 30.5B | **3.3B** | 128 | 8 | ❌ |
+| qwen3-next-80b | MoE | 80B | **3.9B** | 512 | 10 | ✅ |
+| gpt-oss-120b | MoE | 117B | **5.1B** | 128 | 4 | ❌ |
 
-| 모델 | 총 파라미터 | **Active** | Experts | Top-K | MTP/Eagle |
-|------|------------|------------|---------|-------|-----------|
-| glm4.7-flash | 30B | **3B** | 64 | 4 | ✅ |
-| gpt-oss-20b | 21B | **3.6B** | 32 | 4 | ❌ |
-| gpt-oss-120b | 117B | **5.1B** | 128 | 4 | ❌ |
-| qwen3-30b | 30.5B | **3.3B** | 128 | 8 | ❌ |
-| qwen3-next-80b | 80B | **3.9B** | 512 | 10 | ✅ |
-
-### Mamba (SSM) 모델
-
-| 모델 | 아키텍처 | 특징 |
-|------|----------|------|
-| nemotron3-nano | Mamba | RNN 계열, KV 캐시 없음, Decode 빠름 |
+> **nemotron3-nano**: Mamba-2 (23 layers) + GQA Attention (6 layers) + MoE 하이브리드
 
 **핵심**:
-- MoE: 총 파라미터가 아닌 **Active 파라미터 (3~5B)** 가 Latency 결정
-- Mamba: Transformer 대비 **Decode 속도 빠름** (O(1) 메모리)
+- 총 파라미터가 아닌 **Active 파라미터 (3~5B)** 가 Latency 결정
 - **MTP/Eagle 지원**: glm4.7-flash, qwen3-next-80b → Speculative Decoding으로 추가 속도 향상
 
 ---
@@ -296,9 +290,9 @@ nemotron3-nano 싱글턴에서 **54,992 토큰** 폭발 사례 발생
 
 | 모델 | Active | TPS | 비고 |
 |------|--------|-----|------|
-| nemotron3-nano | - | 400 | Mamba (Decode 빠름) |
 | glm4.7-flash | 3B | 300 | MoE + MTP |
 | qwen3-30b | 3.3B | 280 | MoE |
+| nemotron3-nano | 3.5B | 260 | Hybrid Mamba-MoE |
 | gpt-oss-20b | 3.6B | 250 | MoE |
 | qwen3-next-80b | 3.9B | 230 | MoE + MTP |
 | gpt-oss-120b | 5.1B | 180 | MoE |
@@ -307,7 +301,7 @@ nemotron3-nano 싱글턴에서 **54,992 토큰** 폭발 사례 발생
 
 | 순위 | 모델 | Decode 토큰 | MTP | 예상 Latency | Acc | 추천 |
 |------|------|-------------|-----|--------------|-----|------|
-| 1 | nemotron3-nano:think-off | 91 | ❌ | ~0.2s | **40%** ❌ | ❌ |
+| 1 | nemotron3-nano:think-off | 91 | ❌ | ~0.4s | **40%** ❌ | ❌ |
 | 2 | gpt-oss-20b:low | 93 | ❌ | **~0.4s** | 100% ✅ | ✅ |
 | 2 | **glm4.7-flash:think-off** | 172 | ✅ | **~0.4s** | 100% ✅ | 🏆 |
 | 4 | gpt-oss-120b:low | 89 | ❌ | ~0.5s | 100% ✅ | ✅ |
@@ -317,9 +311,9 @@ nemotron3-nano 싱글턴에서 **54,992 토큰** 폭발 사례 발생
 | 8 | **glm4.7-flash:think-all** | 1135 | ✅ | **~2.4s** | 100% ✅ | ✅ |
 | 9 | qwen3-30b | 802 | ❌ | ~2.9s | **60%** ❌ | ❌ |
 | 10 | gpt-oss-120b:high | 834 | ❌ | ~4.6s | 100% ✅ | ✅ |
-| 11 | qwen3-next-80b | 2994 | ✅ | ~5.4s | **80%** ⚠️ | ❌ |
-| 12 | nemotron3-nano | 2474 | ❌ | ~6.2s | 90% ⚠️ | ❌ |
-| 13 | gpt-oss-20b:high | 1937 | ❌ | ~7.8s | 100% ✅ | ✅ |
+| 11 | qwen3-next-80b | 2994 | ✅ | ~5.6s | **80%** ⚠️ | ❌ |
+| 12 | gpt-oss-20b:high | 1937 | ❌ | ~7.8s | 100% ✅ | ✅ |
+| 13 | nemotron3-nano | 2474 | ❌ | ~9.5s | 90% ⚠️ | ❌ |
 
 ### Latency 기준 추천 (Acc 100%)
 
