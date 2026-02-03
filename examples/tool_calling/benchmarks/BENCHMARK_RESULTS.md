@@ -287,25 +287,25 @@ nemotron3-nano 싱글턴에서 **54,992 토큰** 폭발 사례 발생
 
 | 순위 | 모델 | Active | 턴 | Decode 토큰 | MTP | 예상 Latency |
 |------|------|--------|-----|-------------|-----|--------------|
-| 1 | **glm4.7-flash:think-off** | 3B | 4 | 172 | ✅ | **~0.3s** 🏆 |
+| 1 | **glm4.7-flash:think-off** | 3B | 4 | 172 | ✅ | **~0.5s** 🏆 |
 | 2 | gpt-oss-120b:low | 5.1B | 5 | 89 | ❌ | ~0.7s |
 | 3 | gpt-oss-20b:low | 3.6B | 5 | 93 | ❌ | ~0.7s |
 | 4 | gpt-oss-20b:medium | 3.6B | 5 | 245 | ❌ | ~1.2s |
 | 5 | gpt-oss-120b:medium | 5.1B | 5 | 210 | ❌ | ~1.3s |
-| 6 | **glm4.7-flash:think-turn** | 3B | 4 | 973 | ✅ | ~1.4s |
-| 7 | **glm4.7-flash:think-all** | 3B | 4 | 1135 | ✅ | ~1.6s |
+| 6 | **glm4.7-flash:think-turn** | 3B | 4 | 973 | ✅ | ~2.3s |
+| 7 | **glm4.7-flash:think-all** | 3B | 4 | 1135 | ✅ | ~2.7s |
 | 8 | gpt-oss-120b:high | 5.1B | 5 | 834 | ❌ | ~4.7s |
 | 9 | gpt-oss-20b:high | 3.6B | 5 | 1937 | ❌ | ~7.4s |
 
-> MTP 지원 모델: 예상 Latency = 기본 Latency ÷ 2.5 (Speculative Decoding 효과)
+> MTP 지원 모델: 예상 Latency = 기본 Latency ÷ 1.55 (Speculative Decoding, Accept Rate ~55%)
 
 ### Latency 기준 추천
 
 | 용도 | 모델 | Latency | 특징 |
 |------|------|---------|------|
-| **최속 (R=0)** | glm4.7-flash:think-off | **~0.3s** | MTP + 병렬 + R=0 🏆 |
+| **최속 (R=0)** | glm4.7-flash:think-off | **~0.5s** | MTP + 병렬 + R=0 🏆 |
 | **최속 (짧은 R)** | gpt-oss-120b:low | ~0.7s | 토큰 최소 (89), MTP 없음 |
-| **R 필요 + 최속** | glm4.7-flash:think-all | **~1.6s** | MTP + 병렬 + CV 25% |
+| **R 필요 + 최속** | glm4.7-flash:think-all | **~2.7s** | MTP + 병렬 + CV 25% |
 | **R 필요 + 안정** | gpt-oss-120b:high | ~4.7s | CV 19% 최고 안정, MTP 없음 |
 
 ### think-turn 비추천 이유
