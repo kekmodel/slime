@@ -58,6 +58,17 @@ def inject_expert_lora(
         nn.init.kaiming_uniform_(grouped_mlp._lora_A_fc1.data[e], a=math.sqrt(5))
         nn.init.kaiming_uniform_(grouped_mlp._lora_A_fc2.data[e], a=math.sqrt(5))
 
+    # Expert LoRA params are NOT TP-sharded (experts are EP-sharded, not TP-sharded within each rank).
+    # Mark all as non-TP so all_gather_param in adapter save handles them correctly.
+    for p in [
+        grouped_mlp._lora_A_fc1,
+        grouped_mlp._lora_gate_B_fc1,
+        grouped_mlp._lora_up_B_fc1,
+        grouped_mlp._lora_A_fc2,
+        grouped_mlp._lora_B_fc2,
+    ]:
+        p.tensor_model_parallel = False
+
     grouped_mlp._lora_scale = scale
     grouped_mlp._lora_enabled = True
     grouped_mlp._lora_dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
@@ -72,24 +83,56 @@ def inject_expert_lora(
 def _lora_grouped_mlp_forward(self, permuted_local_hidden_states, tokens_per_expert):
     """Patched forward for GroupedMLP with LoRA delta injection.
 
-    Temporarily merges LoRA delta into weights, calls original forward, then unmerges.
+    Computes LoRA deltas with gradient tracking and adds to cloned weights so that
+    autograd can backpropagate through the LoRA parameters. Base weights (frozen) are
+    detached to avoid unnecessary gradient computation.
     """
-    if self._lora_enabled and self._lora_scale != 0.0:
-        _apply_expert_delta(self, merge=True)
+    if not self._lora_enabled or self._lora_scale == 0.0:
+        return self._original_forward(permuted_local_hidden_states, tokens_per_expert)
 
-    output = self._original_forward(permuted_local_hidden_states, tokens_per_expert)
+    E = self.num_local_experts
+    H = self.config.hidden_size
+    F = self.config.ffn_hidden_size
+    scale = self._lora_scale
 
-    if self._lora_enabled and self._lora_scale != 0.0:
-        _apply_expert_delta(self, merge=False)
+    # Compute LoRA deltas WITH gradient tracking (no torch.no_grad!)
+    gate_delta = torch.bmm(self._lora_gate_B_fc1, self._lora_A_fc1) * scale  # [E, F, H]
+    up_delta = torch.bmm(self._lora_up_B_fc1, self._lora_A_fc1) * scale  # [E, F, H]
+    fc2_delta = torch.bmm(self._lora_B_fc2, self._lora_A_fc2) * scale  # [E, H, F]
+
+    # Build modified weight1: base (detached) + LoRA delta
+    # weight1 is [H, E*2F], viewed as [E, H, 2F] where [:,:,:F]=gate, [:,:,F:]=up
+    w1_base = self.weight1.detach().view(E, H, 2 * F)
+    w1_gate = w1_base[:, :, :F] + gate_delta.transpose(-1, -2)  # [E, H, F]
+    w1_up = w1_base[:, :, F:] + up_delta.transpose(-1, -2)  # [E, H, F]
+    w1_modified = torch.cat([w1_gate, w1_up], dim=-1).reshape_as(self.weight1)  # [H, E*2F]
+
+    # Build modified weight2: base (detached) + LoRA delta
+    # weight2 is [E*F, H], viewed as [E, F, H]
+    w2_base = self.weight2.detach().view(E, F, H)
+    w2_modified = (w2_base + fc2_delta.transpose(-1, -2)).reshape_as(self.weight2)  # [E*F, H]
+
+    # Temporarily swap weights via _parameters dict to bypass Module.__setattr__
+    # (which rejects non-Parameter tensors). The original forward accesses self.weight1/weight2
+    # which goes through __getattr__ -> _parameters lookup.
+    orig_w1 = self._parameters["weight1"]
+    orig_w2 = self._parameters["weight2"]
+    self._parameters["weight1"] = w1_modified
+    self._parameters["weight2"] = w2_modified
+    try:
+        output = self._original_forward(permuted_local_hidden_states, tokens_per_expert)
+    finally:
+        self._parameters["weight1"] = orig_w1
+        self._parameters["weight2"] = orig_w2
 
     return output
 
 
 def _apply_expert_delta(grouped_mlp, merge: bool) -> None:
-    """Add or subtract LoRA delta from GroupedMLP's weight1/weight2.
+    """Add or subtract LoRA delta from GroupedMLP's weight1/weight2 in-place.
 
-    Uses torch.no_grad() to avoid tracking temporary merge/unmerge ops for base weights.
-    LoRA params get gradients through normal autograd when they're part of the module.
+    Used by merge/unmerge utilities (NOT the forward pass). Operates under no_grad
+    since this modifies base weight .data directly for weight transfer to SGLang.
     """
     sign = 1.0 if merge else -1.0
     scale = grouped_mlp._lora_scale
@@ -100,17 +143,14 @@ def _apply_expert_delta(grouped_mlp, merge: bool) -> None:
 
     with torch.no_grad():
         # FC1: weight1 is [H, E*2F]
-        # gate_delta = gate_B @ A -> [E, F, rank] @ [E, rank, H] = [E, F, H]
         gate_delta = torch.bmm(grouped_mlp._lora_gate_B_fc1, grouped_mlp._lora_A_fc1) * scale
         up_delta = torch.bmm(grouped_mlp._lora_up_B_fc1, grouped_mlp._lora_A_fc1) * scale
 
-        # weight1 viewed as [E, H, 2F] -> gate is [:, :, :F], up is [:, :, F:]
         w1_view = grouped_mlp.weight1.data.view(E, H, 2 * F)
-        w1_view[:, :, :F] += sign * gate_delta.transpose(-1, -2)  # [E, F, H].T -> [E, H, F]
+        w1_view[:, :, :F] += sign * gate_delta.transpose(-1, -2)
         w1_view[:, :, F:] += sign * up_delta.transpose(-1, -2)
 
         # FC2: weight2 is [E*F, H]
-        # fc2_delta = B @ A -> [E, H, rank] @ [E, rank, F] = [E, H, F]
         fc2_delta = torch.bmm(grouped_mlp._lora_B_fc2, grouped_mlp._lora_A_fc2) * scale
         w2_view = grouped_mlp.weight2.data.view(E, F, H)
-        w2_view += sign * fc2_delta.transpose(-1, -2)  # [E, H, F].T -> [E, F, H]
+        w2_view += sign * fc2_delta.transpose(-1, -2)

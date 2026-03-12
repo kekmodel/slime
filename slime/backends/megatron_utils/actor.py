@@ -88,7 +88,7 @@ class MegatronTrainRayActor(TrainRayActor):
             self.args.lr = self.args.critic_lr
             self.args.lr_warmup_iters = self.args.critic_lr_warmup_iters
 
-        (self.model, self.optimizer, self.opt_param_scheduler, loaded_rollout_id) = initialize_model_and_optimizer(
+        self.model, self.optimizer, self.opt_param_scheduler, loaded_rollout_id = initialize_model_and_optimizer(
             args, role
         )
         self._lora_enabled = getattr(args, "lora_rank", 0) > 0
@@ -404,6 +404,7 @@ class MegatronTrainRayActor(TrainRayActor):
                     )
                     for model_chunk in self.model:
                         enable_lora(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
+                    # LoRA path: model was never swapped, no _switch_model needed
                 elif "ref" in self.weights_backuper.backup_tags:
                     if self.args.use_routing_replay:
                         os.environ["ROUTING_REPLAY_STAGE"] = "fallthrough"
@@ -415,7 +416,9 @@ class MegatronTrainRayActor(TrainRayActor):
                             store_prefix="ref_",
                         )
                     )
-                self._switch_model("old_actor" if self.args.keep_old_actor else "actor")
+                    self._switch_model("old_actor" if self.args.keep_old_actor else "actor")
+                elif self.args.keep_old_actor:
+                    self._switch_model("old_actor")
                 if not self.args.use_rollout_logprobs or self.args.get_mismatch_metrics:
                     if self.args.use_routing_replay:
                         if self.args.use_rollout_routing_replay:

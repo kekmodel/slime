@@ -96,3 +96,31 @@ def test_expert_lora_disable_enable():
 
     mlp._lora_scale = mlp._saved_lora_scale
     assert mlp._lora_scale == 2.0
+
+
+def test_expert_lora_gradient_flow():
+    """Expert LoRA params should receive gradients through the patched forward."""
+    from slime.backends.megatron_utils.lora.expert_lora import inject_expert_lora
+
+    mlp = MockGroupedMLP(num_local_experts=2, hidden_size=16, ffn_hidden=32)
+    inject_expert_lora(mlp, rank=4, alpha=8)
+
+    # Set non-zero B so LoRA has effect
+    mlp._lora_gate_B_fc1.data.normal_(std=0.01)
+    mlp._lora_up_B_fc1.data.normal_(std=0.01)
+    mlp._lora_B_fc2.data.normal_(std=0.01)
+
+    x = torch.randn(4, 16, requires_grad=False)
+    tokens_per_expert = torch.tensor([2, 2])
+    output = mlp(x, tokens_per_expert)
+    loss = output.sum()
+    loss.backward()
+
+    # LoRA params should have gradients
+    assert mlp._lora_A_fc1.grad is not None, "lora_A_fc1 should have gradients"
+    assert mlp._lora_gate_B_fc1.grad is not None, "lora_gate_B_fc1 should have gradients"
+    assert mlp._lora_up_B_fc1.grad is not None, "lora_up_B_fc1 should have gradients"
+
+    # Base weights should NOT have gradients (they are used via .detach())
+    assert mlp.weight1.grad is None, "base weight1 should not have gradients"
+    assert mlp.weight2.grad is None, "base weight2 should not have gradients"
