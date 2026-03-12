@@ -91,6 +91,8 @@ class MegatronTrainRayActor(TrainRayActor):
         (self.model, self.optimizer, self.opt_param_scheduler, loaded_rollout_id) = initialize_model_and_optimizer(
             args, role
         )
+        self._lora_enabled = getattr(args, "lora_rank", 0) > 0
+        self._needs_ref_logprobs = args.kl_coef != 0 or getattr(args, "use_kl_loss", False)
 
         if role == "critic":
             if self.args.offload_train:
@@ -112,7 +114,11 @@ class MegatronTrainRayActor(TrainRayActor):
         self.weights_backuper.backup("actor")
 
         if with_ref:
-            self.load_other_checkpoint("ref", args.ref_load)
+            if self._lora_enabled:
+                # With LoRA, ref model = base model (adapter off). No separate checkpoint needed.
+                logger.info("LoRA mode: ref model uses base weights (adapter off), skipping ref checkpoint load")
+            else:
+                self.load_other_checkpoint("ref", args.ref_load)
 
         if self.args.keep_old_actor:
             # Load old_actor checkpoint
@@ -376,7 +382,24 @@ class MegatronTrainRayActor(TrainRayActor):
 
         with inverse_timer("train_wait"), timer("train"):
             if self.args.compute_advantages_and_returns:
-                if "ref" in self.weights_backuper.backup_tags:
+                if self._lora_enabled and self._needs_ref_logprobs:
+                    # [I2] LoRA: adapter off = ref model (no weight switch needed)
+                    from slime.backends.megatron_utils.lora import disable_lora, enable_lora
+
+                    for model_chunk in self.model:
+                        disable_lora(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
+                    if self.args.use_routing_replay:
+                        os.environ["ROUTING_REPLAY_STAGE"] = "fallthrough"
+                    rollout_data.update(
+                        self.compute_log_prob(
+                            data_iterator,
+                            num_microbatches,
+                            store_prefix="ref_",
+                        )
+                    )
+                    for model_chunk in self.model:
+                        enable_lora(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
+                elif "ref" in self.weights_backuper.backup_tags:
                     if self.args.use_routing_replay:
                         os.environ["ROUTING_REPLAY_STAGE"] = "fallthrough"
                     self._switch_model("ref")
@@ -496,9 +519,29 @@ class MegatronTrainRayActor(TrainRayActor):
             dist.barrier(group=get_gloo_group())
 
         with torch_memory_saver.disable() if self.args.offload_train else nullcontext():
+            if self._lora_enabled:
+                from slime.backends.megatron_utils.lora import merge_lora_weights, unmerge_lora_weights
+
+                # Merge LoRA into base weights on GPU before transfer
+                for model_chunk in self.model:
+                    merge_lora_weights(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
+
+                # [C2] Colocate path: CPU backup has unmerged weights. Re-backup after merge.
+                if self.args.colocate and self.args.enable_weights_backuper:
+                    self.weights_backuper.backup("actor")
+
             print_memory("before update_weights")
             self.weight_updater.update_weights()
             print_memory("after update_weights")
+
+            if self._lora_enabled:
+                # Unmerge to restore base weights for continued training
+                for model_chunk in self.model:
+                    unmerge_lora_weights(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
+
+                # [C2] Colocate path: Restore CPU backup to unmerged state
+                if self.args.colocate and self.args.enable_weights_backuper:
+                    self.weights_backuper.backup("actor")
 
             if self.args.ci_test and len(rollout_engines) > 0:
                 engine = random.choice(rollout_engines)
