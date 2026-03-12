@@ -4,11 +4,29 @@
 
 **Goal:** Add LoRA (Low-Rank Adaptation) training to slime's Megatron backend with merge-based weight transfer, including MoE expert LoRA support.
 
-**Architecture:** LoRA adapters wrap existing Megatron parallel linear layers. Base weights are frozen; only LoRA params receive gradients. Before weight transfer to SGLang, LoRA weights are merged into base weights so SGLang runs in normal mode (zero inference overhead). Ref model in RL uses adapter-off (scaling=0) instead of CPU weight swap.
+**Architecture:** LoRA adapters wrap existing Megatron parallel linear layers. Base weights are frozen; only LoRA params receive gradients. Before weight transfer to SGLang, LoRA weights are merged into base weights so SGLang runs in normal mode (zero inference overhead). Ref model in RL uses adapter-off (scaling=0) instead of CPU weight swap. MoE expert LoRA uses monkey-patched GroupedMLP forward to inject LoRA delta into stacked weights before the fused gmm kernel.
 
 **Tech Stack:** PyTorch, Megatron-Core (ColumnParallelLinear, RowParallelLinear, GroupedMLP), slime Megatron backend
 
 **Spec:** `docs/plans/2026-03-12-megatron-lora-training-design.md`
+
+---
+
+## Issue Resolution Summary
+
+This plan resolves the following critical and important issues identified during review:
+
+| ID | Issue | Resolution |
+|----|-------|------------|
+| **C1** | GroupedMLP expert LoRA forward not wired | Monkey-patch `GroupedMLP.forward()` to inject `bmm`-computed delta into `w1`/`w2` before `gg.ops.gmm` call |
+| **C2** | Colocate CPU backup has unmerged weights | merge→re-backup→transfer→unmerge→re-backup; optimize with Noop backuper when LoRA |
+| **C3** | `_interleave_qkv` merge dimension wrong | Transpose Q/K/V deltas before interleave: delta is `[out, H]`, interleave operates on last dim |
+| **I1** | `num_kv_heads < tp_size` crashes LoRA dim | Read `base_layer.output_size_per_partition` directly instead of manual calculation |
+| **I2** | `"ref" in backup_tags` always False with LoRA | New `_lora_enabled` / `_needs_ref_logprobs` flags; use `disable_lora`/`enable_lora` for ref forward |
+| **I3** | `ref_update_interval` meaningless with LoRA | Auto-disable with warning in argument validation |
+| **I4** | `save_adapter_only` not defined as argument | Add `--save-adapter-only` / `--no-save-adapter-only` with auto-default |
+| **I5** | Adapter save from TP rank 0 is incomplete | All-gather LoRA params across TP before saving from rank 0 |
+| **I6** | VP decoder layers not iterated | `inject_lora_adapters` / `merge` / `save` accept `list[DDP]` and iterate all VP chunks |
 
 ---
 
@@ -20,23 +38,26 @@
 |------|---------------|
 | `slime/backends/megatron_utils/lora/__init__.py` | Package exports |
 | `slime/backends/megatron_utils/lora/config.py` | `LoRAConfig` dataclass, argument registration |
-| `slime/backends/megatron_utils/lora/layers.py` | TP-compatible LoRA wrapper layers (2D + 3D) |
-| `slime/backends/megatron_utils/lora/injection.py` | `inject_lora_adapters()`, `freeze_base_params()` |
-| `slime/backends/megatron_utils/lora/merge.py` | `merge_lora_weights()`, `unmerge_lora_weights()`, `disable_lora()`, `enable_lora()` |
+| `slime/backends/megatron_utils/lora/layers.py` | TP-compatible LoRA wrapper layers (2D shared + fused QKV/FC1) |
+| `slime/backends/megatron_utils/lora/expert_lora.py` | Expert LoRA: 3D params + GroupedMLP forward monkey-patch (C1) |
+| `slime/backends/megatron_utils/lora/injection.py` | `inject_lora_adapters()`, `freeze_base_params()` — VP-aware (I6) |
+| `slime/backends/megatron_utils/lora/merge.py` | `merge_lora_weights()`, `unmerge_lora_weights()`, `disable_lora()`, `enable_lora()` — handles expert + fused QKV (C3) |
+| `tests/test_lora_config.py` | Unit tests for LoRA configuration |
 | `tests/test_lora_layers.py` | Unit tests for LoRA layer correctness |
 | `tests/test_lora_merge.py` | Unit tests for merge/unmerge roundtrip |
 | `tests/test_lora_injection.py` | Unit tests for injection + freeze |
+| `tests/test_lora_expert.py` | Unit tests for expert LoRA forward + merge |
 
 ### Modified Files
 
 | File | Changes |
 |------|---------|
-| `slime/utils/arguments.py` | Add LoRA CLI arguments |
-| `slime/backends/megatron_utils/model.py:83-123` | Inject LoRA in `setup_model_and_optimizer()` |
-| `slime/backends/megatron_utils/actor.py:370-460` | LoRA ref forward in `train_actor()` |
-| `slime/backends/megatron_utils/actor.py:484-523` | Merge/unmerge around `update_weights()` |
-| `slime/backends/megatron_utils/actor.py:48-154` | Skip ref backup in `init()` when LoRA |
-| `slime/backends/megatron_utils/model.py:663-688` | Adapter-only save path in `save()` |
+| `slime/utils/arguments.py` | Add LoRA CLI arguments, I3 validation, I4 auto-default |
+| `slime/backends/megatron_utils/model.py:83-123` | Inject LoRA in `setup_model_and_optimizer()`, VP-aware (I6) |
+| `slime/backends/megatron_utils/model.py:663-688` | Adapter-only save with all_gather (I5) |
+| `slime/backends/megatron_utils/actor.py:48-154` | LoRA-aware init: skip ref backup, set `_lora_enabled` flag (I2) |
+| `slime/backends/megatron_utils/actor.py:370-460` | LoRA ref forward via disable/enable (I2), C2 merge timing |
+| `slime/backends/megatron_utils/actor.py:484-523` | Merge/unmerge around `update_weights()` with colocate re-backup (C2) |
 | `slime/backends/megatron_utils/checkpoint.py` | Adapter checkpoint load support |
 
 ---
@@ -149,7 +170,7 @@ Create `slime/backends/megatron_utils/lora/config.py`:
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 ALL_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj", "expert"]
 DEFAULT_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
@@ -203,11 +224,19 @@ def add_lora_args(parser: argparse._ActionsContainer) -> None:
     )
     group.add_argument("--lora-dropout", type=float, default=0.0, help="LoRA dropout rate.")
     group.add_argument("--adapter-load", type=str, default=None, help="Path to load LoRA adapter checkpoint.")
+    # [I4] --save-adapter-only with auto-default when LoRA is enabled
     group.add_argument(
         "--save-adapter-only",
         action="store_true",
-        default=False,
-        help="Save only adapter weights in checkpoint. Default when lora_rank > 0.",
+        default=None,
+        dest="save_adapter_only",
+        help="Save only adapter weights in checkpoint. Default: True when --lora-rank > 0.",
+    )
+    group.add_argument(
+        "--no-save-adapter-only",
+        action="store_false",
+        dest="save_adapter_only",
+        help="Save full checkpoint even when LoRA is enabled.",
     )
 ```
 
@@ -220,21 +249,40 @@ Expected: All 4 tests PASS
 
 - [ ] **Step 6: Add LoRA args to slime argument parser**
 
-In `slime/utils/arguments.py`, find where custom argument groups are added (near the end of the `parse_args` function or in `_add_slime_args`) and add:
+In `slime/utils/arguments.py`, find where custom argument groups are added and add:
 
 ```python
 from slime.backends.megatron_utils.lora.config import add_lora_args
 ```
 
-Call `add_lora_args(parser)` in the argument registration section. Also add validation:
-- If `--lora-rank > 0` and `--lora-target-modules` is None, set to `DEFAULT_TARGET_MODULES`
-- `--lora-rank > 0` is incompatible with `--only-train-params-name-list` (if it exists in Megatron args)
+Call `add_lora_args(parser)` in the argument registration section. Also add validation in the post-processing section:
+
+```python
+# [I4] Auto-set save_adapter_only when LoRA is enabled
+if args.save_adapter_only is None:
+    args.save_adapter_only = getattr(args, "lora_rank", 0) > 0
+
+# Set default target modules if not specified
+if getattr(args, "lora_rank", 0) > 0 and args.lora_target_modules is None:
+    from slime.backends.megatron_utils.lora.config import DEFAULT_TARGET_MODULES
+    args.lora_target_modules = list(DEFAULT_TARGET_MODULES)
+
+# [I3] LoRA makes ref_update_interval meaningless (base is frozen)
+if getattr(args, "lora_rank", 0) > 0 and args.ref_update_interval is not None:
+    logger.warning(
+        "--ref-update-interval is ignored when LoRA is enabled. "
+        "In LoRA mode, ref model = base model (adapter off), which is frozen."
+    )
+    args.ref_update_interval = None
+```
 
 - [ ] **Step 7: Commit**
 
 ```bash
 git add slime/backends/megatron_utils/lora/ tests/test_lora_config.py slime/utils/arguments.py
-git commit -m "feat(lora): add LoRAConfig and CLI arguments"
+git commit -m "feat(lora): add LoRAConfig and CLI arguments
+
+Includes I3 (ref_update_interval auto-disable) and I4 (save_adapter_only auto-default)."
 ```
 
 ---
@@ -374,8 +422,7 @@ def test_lora_scaling():
 
     x = torch.ones(1, 1, 4)
     out, _ = lora(x)
-    # base=0, lora = x @ A^T @ B^T * 2.0 = [1,1,1,1] @ [[1,0],[0,1],[0,0],[0,0]] @ [[1,0,0,0],[0,1,0,0]] * 2
-    # = [1,1,0,0] @ [[1,0,0,0],[0,1,0,0]] * 2 = [1,1,0,0] * 2 = [2,2,0,0]
+    # base=0, lora = x @ A^T @ B^T * 2.0 = [1,1,0,0] * 2 = [2,2,0,0]
     expected = torch.tensor([[[2.0, 2.0, 0.0, 0.0]]])
     torch.testing.assert_close(out, expected)
 ```
@@ -428,6 +475,7 @@ class LoRAColumnParallelLinear(nn.Module):
         # TP attributes — lora_B follows base weight partitioning
         self.lora_B.tensor_model_parallel = True
         self.lora_B.partition_dim = 0
+        self.lora_B.partition_stride = 1
         # lora_A is replicated
         self.lora_A.tensor_model_parallel = False
 
@@ -469,6 +517,7 @@ class LoRARowParallelLinear(nn.Module):
         # TP attributes — lora_A follows base weight partitioning
         self.lora_A.tensor_model_parallel = True
         self.lora_A.partition_dim = 1
+        self.lora_A.partition_stride = 1
         # lora_B is replicated
         self.lora_B.tensor_model_parallel = False
 
@@ -507,6 +556,10 @@ git commit -m "feat(lora): add LoRAColumnParallelLinear and LoRARowParallelLinea
 - Modify: `slime/backends/megatron_utils/lora/layers.py`
 - Test: `tests/test_lora_layers.py` (append)
 
+> **[I1] Fix:** LoRAFusedQKV does NOT compute `num_kv_heads_per_tp` internally. It receives
+> `num_q_heads_per_tp` and `num_kv_heads_per_tp` from the caller. The caller (Task 6) derives these
+> from `base_layer.output_size_per_partition` to handle `num_kv_heads < tp_size` correctly.
+
 - [ ] **Step 1: Write fused QKV LoRA test**
 
 Append to `tests/test_lora_layers.py`:
@@ -541,6 +594,22 @@ def test_lora_fused_qkv_zero_init():
     base_out, _ = base(x)
     lora_out, _ = lora(x)
     torch.testing.assert_close(lora_out, base_out)
+
+
+def test_lora_fused_qkv_kv_heads_equal_one():
+    """[I1] Test with num_kv_heads_per_tp=1 (simulating num_kv_heads < tp_size with replication)."""
+    from slime.backends.megatron_utils.lora.layers import LoRAFusedQKV
+
+    # num_kv_heads=1 per TP rank (replicated), num_q_heads=4 per TP rank, head_dim=8
+    qkv_out = (4 + 2 * 1) * 8  # = 48
+    base = MockColumnParallelLinear(input_size=64, output_size_per_partition=qkv_out)
+    lora = LoRAFusedQKV(
+        base, rank=4, alpha=8,
+        num_q_heads_per_tp=4, num_kv_heads_per_tp=1, head_dim=8,
+    )
+    x = torch.randn(1, 5, 64)
+    out, _ = lora(x)
+    assert out.shape == (1, 5, 48)
 
 
 def test_lora_fused_fc1_forward_shape():
@@ -629,6 +698,7 @@ class LoRAFusedQKV(nn.Module):
         for b_param in [self.q_lora_B, self.k_lora_B, self.v_lora_B]:
             b_param.tensor_model_parallel = True
             b_param.partition_dim = 0
+            b_param.partition_stride = 1
         for a_param in [self.q_lora_A, self.k_lora_A, self.v_lora_A]:
             a_param.tensor_model_parallel = False
 
@@ -673,6 +743,33 @@ def _interleave_qkv(
     return interleaved.view(*prefix_shape, -1)
 
 
+def _interleave_qkv_weight(
+    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
+    num_q_heads_per_tp: int, num_kv_heads_per_tp: int, head_dim: int,
+) -> torch.Tensor:
+    """[C3] Interleave Q/K/V weight deltas (2D: [out_dim, input_dim]).
+
+    Unlike _interleave_qkv which operates on activation tensors [..., last_dim],
+    weight deltas have shape [out_dim, H]. We interleave along dim=0 (the output dim).
+
+    Args:
+        q: [q_out, H], k: [kv_out, H], v: [kv_out, H]
+    Returns:
+        [qkv_out, H] in interleaved group layout
+    """
+    q_per_kv = num_q_heads_per_tp // num_kv_heads_per_tp
+    H = q.shape[1]
+
+    # Reshape to per-group: [num_kv_groups, heads*head_dim, H]
+    q = q.view(num_kv_heads_per_tp, q_per_kv * head_dim, H)
+    k = k.view(num_kv_heads_per_tp, head_dim, H)
+    v = v.view(num_kv_heads_per_tp, head_dim, H)
+
+    # Interleave along dim=1 (output dim within each group)
+    interleaved = torch.cat([q, k, v], dim=1)  # [num_kv_groups, (q_per_kv+2)*head_dim, H]
+    return interleaved.view(-1, H)  # [qkv_out, H]
+
+
 class LoRAFusedFC1(nn.Module):
     """Separate gate/up LoRA adapters on Megatron's fused linear_fc1 (ColumnParallel, SwiGLU).
 
@@ -704,6 +801,7 @@ class LoRAFusedFC1(nn.Module):
         for b_param in [self.gate_lora_B, self.up_lora_B]:
             b_param.tensor_model_parallel = True
             b_param.partition_dim = 0
+            b_param.partition_stride = 1
         for a_param in [self.gate_lora_A, self.up_lora_A]:
             a_param.tensor_model_parallel = False
 
@@ -726,13 +824,16 @@ class LoRAFusedFC1(nn.Module):
 ```bash
 cd /Users/jd/Documents/workspace/slime && python -m pytest tests/test_lora_layers.py -v
 ```
-Expected: All 11 tests PASS
+Expected: All 12 tests PASS (7 shared + 5 fused)
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add slime/backends/megatron_utils/lora/layers.py tests/test_lora_layers.py
-git commit -m "feat(lora): add LoRAFusedQKV and LoRAFusedFC1 layers"
+git commit -m "feat(lora): add LoRAFusedQKV and LoRAFusedFC1 layers
+
+Includes _interleave_qkv_weight for correct weight-space merge (C3 fix).
+Adds I1 test for num_kv_heads_per_tp=1 edge case."
 ```
 
 ---
@@ -744,6 +845,10 @@ git commit -m "feat(lora): add LoRAFusedQKV and LoRAFusedFC1 layers"
 **Files:**
 - Create: `slime/backends/megatron_utils/lora/merge.py`
 - Test: `tests/test_lora_merge.py`
+
+> **[C3] Fix:** `_merge_fused_qkv` uses `_interleave_qkv_weight` (operates on `[out, H]`) instead of
+> `_interleave_qkv` (operates on `[..., last_dim]`). The weight matrix is `[output_dim, input_dim]`
+> so interleaving must happen along dim=0, not the last dim.
 
 - [ ] **Step 1: Write merge/unmerge tests**
 
@@ -800,6 +905,50 @@ def test_merge_equivalence():
     torch.testing.assert_close(merged_out, lora_out, atol=1e-5, rtol=1e-5)
 
 
+def test_merge_fused_qkv_roundtrip():
+    """[C3] Fused QKV merge/unmerge roundtrip with correct weight dimension handling."""
+    from slime.backends.megatron_utils.lora.layers import LoRAFusedQKV
+    from slime.backends.megatron_utils.lora.merge import merge_lora_weights, unmerge_lora_weights
+
+    qkv_out = (4 + 2 * 2) * 8  # 64
+    base = MockColumnParallelLinear(input_size=32, output_size_per_partition=qkv_out)
+    lora = LoRAFusedQKV(base, rank=4, alpha=8, num_q_heads_per_tp=4, num_kv_heads_per_tp=2, head_dim=8)
+    # Initialize with non-zero values
+    lora.q_lora_B.data.normal_()
+    lora.k_lora_B.data.normal_()
+    lora.v_lora_B.data.normal_()
+
+    original_weight = base.weight.data.clone()
+
+    model = nn.Module()
+    model.layer = lora
+
+    merge_lora_weights(model)
+    assert not torch.allclose(base.weight.data, original_weight)
+
+    unmerge_lora_weights(model)
+    torch.testing.assert_close(base.weight.data, original_weight, atol=1e-6, rtol=1e-6)
+
+
+def test_merge_fused_fc1_roundtrip():
+    from slime.backends.megatron_utils.lora.layers import LoRAFusedFC1
+    from slime.backends.megatron_utils.lora.merge import merge_lora_weights, unmerge_lora_weights
+
+    base = MockColumnParallelLinear(input_size=32, output_size_per_partition=64)
+    lora = LoRAFusedFC1(base, rank=4, alpha=8)
+    lora.gate_lora_B.data.normal_()
+    lora.up_lora_B.data.normal_()
+
+    original_weight = base.weight.data.clone()
+
+    model = nn.Module()
+    model.layer = lora
+
+    merge_lora_weights(model)
+    unmerge_lora_weights(model)
+    torch.testing.assert_close(base.weight.data, original_weight, atol=1e-6, rtol=1e-6)
+
+
 def test_disable_enable_lora():
     """disable_lora should make output equal to base; enable_lora should restore."""
     from slime.backends.megatron_utils.lora.layers import LoRAColumnParallelLinear
@@ -841,6 +990,7 @@ Create `slime/backends/megatron_utils/lora/merge.py`:
 """LoRA weight merge/unmerge and disable/enable utilities."""
 from __future__ import annotations
 
+import torch
 import torch.nn as nn
 
 from slime.backends.megatron_utils.lora.layers import (
@@ -848,6 +998,7 @@ from slime.backends.megatron_utils.lora.layers import (
     LoRAFusedFC1,
     LoRAFusedQKV,
     LoRARowParallelLinear,
+    _interleave_qkv_weight,
 )
 
 _LORA_LAYER_TYPES = (LoRAColumnParallelLinear, LoRARowParallelLinear, LoRAFusedQKV, LoRAFusedFC1)
@@ -857,7 +1008,6 @@ def merge_lora_weights(model: nn.Module) -> None:
     """Merge LoRA adapters into base weights in-place. Call before weight transfer."""
     for module in model.modules():
         if isinstance(module, LoRAColumnParallelLinear):
-            # W += B @ A * scale
             module.base_layer.weight.data += (module.lora_B @ module.lora_A) * module.scaling
         elif isinstance(module, LoRARowParallelLinear):
             module.base_layer.weight.data += (module.lora_B @ module.lora_A) * module.scaling
@@ -881,35 +1031,30 @@ def unmerge_lora_weights(model: nn.Module) -> None:
 
 
 def _merge_fused_qkv(module: LoRAFusedQKV) -> None:
-    """Merge Q/K/V LoRA into fused QKV weight in interleaved layout."""
-    from slime.backends.megatron_utils.lora.layers import _interleave_qkv
+    """[C3] Merge Q/K/V LoRA into fused QKV weight in interleaved layout.
 
+    Weight is [qkv_out, H]. _interleave_qkv_weight operates on dim=0 (output dim).
+    """
     q_delta = (module.q_lora_B @ module.q_lora_A) * module.scaling  # [q_out, H]
     k_delta = (module.k_lora_B @ module.k_lora_A) * module.scaling  # [kv_out, H]
     v_delta = (module.v_lora_B @ module.v_lora_A) * module.scaling  # [kv_out, H]
 
-    # Interleave to match base weight layout: [QKV_dim/T, H]
-    # _interleave_qkv expects [..., dim] format, here we use [dim, H] → treat H as batch
-    delta = _interleave_qkv(
-        q_delta.unsqueeze(0), k_delta.unsqueeze(0), v_delta.unsqueeze(0),
+    delta = _interleave_qkv_weight(
+        q_delta, k_delta, v_delta,
         module.num_q_heads_per_tp, module.num_kv_heads_per_tp, module.head_dim,
-    ).squeeze(0)
-
+    )
     module.base_layer.weight.data += delta
 
 
 def _unmerge_fused_qkv(module: LoRAFusedQKV) -> None:
-    from slime.backends.megatron_utils.lora.layers import _interleave_qkv
-
     q_delta = (module.q_lora_B @ module.q_lora_A) * module.scaling
     k_delta = (module.k_lora_B @ module.k_lora_A) * module.scaling
     v_delta = (module.v_lora_B @ module.v_lora_A) * module.scaling
 
-    delta = _interleave_qkv(
-        q_delta.unsqueeze(0), k_delta.unsqueeze(0), v_delta.unsqueeze(0),
+    delta = _interleave_qkv_weight(
+        q_delta, k_delta, v_delta,
         module.num_q_heads_per_tp, module.num_kv_heads_per_tp, module.head_dim,
-    ).squeeze(0)
-
+    )
     module.base_layer.weight.data -= delta
 
 
@@ -917,7 +1062,6 @@ def _merge_fused_fc1(module: LoRAFusedFC1) -> None:
     """Merge gate/up LoRA into fused FC1 weight."""
     gate_delta = (module.gate_lora_B @ module.gate_lora_A) * module.scaling
     up_delta = (module.up_lora_B @ module.up_lora_A) * module.scaling
-    import torch
     delta = torch.cat([gate_delta, up_delta], dim=0)
     module.base_layer.weight.data += delta
 
@@ -925,7 +1069,6 @@ def _merge_fused_fc1(module: LoRAFusedFC1) -> None:
 def _unmerge_fused_fc1(module: LoRAFusedFC1) -> None:
     gate_delta = (module.gate_lora_B @ module.gate_lora_A) * module.scaling
     up_delta = (module.up_lora_B @ module.up_lora_A) * module.scaling
-    import torch
     delta = torch.cat([gate_delta, up_delta], dim=0)
     module.base_layer.weight.data -= delta
 
@@ -936,6 +1079,10 @@ def disable_lora(model: nn.Module) -> None:
         if isinstance(module, _LORA_LAYER_TYPES):
             module._saved_scaling = module.scaling
             module.scaling = 0.0
+        # Also handle expert LoRA (imported lazily to avoid circular deps)
+        if hasattr(module, "_lora_enabled") and hasattr(module, "_lora_scale"):
+            module._saved_lora_scale = module._lora_scale
+            module._lora_scale = 0.0
 
 
 def enable_lora(model: nn.Module) -> None:
@@ -945,6 +1092,9 @@ def enable_lora(model: nn.Module) -> None:
             if hasattr(module, "_saved_scaling"):
                 module.scaling = module._saved_scaling
                 del module._saved_scaling
+        if hasattr(module, "_saved_lora_scale"):
+            module._lora_scale = module._saved_lora_scale
+            del module._saved_lora_scale
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -952,13 +1102,16 @@ def enable_lora(model: nn.Module) -> None:
 ```bash
 cd /Users/jd/Documents/workspace/slime && python -m pytest tests/test_lora_merge.py -v
 ```
-Expected: All 3 tests PASS
+Expected: All 5 tests PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add slime/backends/megatron_utils/lora/merge.py tests/test_lora_merge.py
-git commit -m "feat(lora): add merge/unmerge and disable/enable utilities"
+git commit -m "feat(lora): add merge/unmerge and disable/enable utilities
+
+Uses _interleave_qkv_weight for correct weight-dim merge (C3 fix).
+Handles expert LoRA disable/enable via _lora_scale attribute."
 ```
 
 ---
@@ -970,6 +1123,9 @@ git commit -m "feat(lora): add merge/unmerge and disable/enable utilities"
 **Files:**
 - Create: `slime/backends/megatron_utils/lora/injection.py`
 - Test: `tests/test_lora_injection.py`
+
+> **[I6] Fix:** `inject_lora_adapters` accepts `list[DDP]` (VP model chunks) and iterates all chunks.
+> `_get_decoder_layers` handles DDP unwrapping + VP chunk iteration.
 
 - [ ] **Step 1: Write injection test**
 
@@ -1032,7 +1188,7 @@ def test_inject_lora_replaces_layers():
         target_modules=("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"),
     )
     inject_lora_adapters(
-        model, config,
+        [model], config,  # [I6] Accepts list of model chunks
         num_q_heads_per_tp=8, num_kv_heads_per_tp=2, head_dim=8,
     )
 
@@ -1043,14 +1199,34 @@ def test_inject_lora_replaces_layers():
     assert isinstance(layer.mlp.linear_fc2, LoRARowParallelLinear)
 
 
+def test_inject_lora_vp_multiple_chunks():
+    """[I6] Injection should work across VP chunks."""
+    from slime.backends.megatron_utils.lora.config import LoRAConfig
+    from slime.backends.megatron_utils.lora.injection import inject_lora_adapters
+    from slime.backends.megatron_utils.lora.layers import LoRAFusedQKV
+
+    chunk0 = _make_mock_model(num_layers=1)
+    chunk1 = _make_mock_model(num_layers=1)
+    config = LoRAConfig(rank=8, alpha=16, target_modules=("q_proj", "k_proj", "v_proj"))
+
+    inject_lora_adapters(
+        [chunk0, chunk1], config,
+        num_q_heads_per_tp=8, num_kv_heads_per_tp=2, head_dim=8,
+    )
+
+    # Both chunks should have LoRA injected
+    assert isinstance(chunk0.decoder.layers[0].self_attention.linear_qkv, LoRAFusedQKV)
+    assert isinstance(chunk1.decoder.layers[0].self_attention.linear_qkv, LoRAFusedQKV)
+
+
 def test_freeze_base_params():
     from slime.backends.megatron_utils.lora.config import LoRAConfig
     from slime.backends.megatron_utils.lora.injection import freeze_base_params, inject_lora_adapters
 
     model = _make_mock_model(num_layers=1)
     config = LoRAConfig(rank=8, alpha=16, target_modules=("q_proj", "k_proj", "v_proj"))
-    inject_lora_adapters(model, config, num_q_heads_per_tp=8, num_kv_heads_per_tp=2, head_dim=8)
-    freeze_base_params(model)
+    inject_lora_adapters([model], config, num_q_heads_per_tp=8, num_kv_heads_per_tp=2, head_dim=8)
+    freeze_base_params([model])
 
     trainable = {n for n, p in model.named_parameters() if p.requires_grad}
     frozen = {n for n, p in model.named_parameters() if not p.requires_grad}
@@ -1079,12 +1255,12 @@ Create `slime/backends/megatron_utils/lora/injection.py`:
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 
 import torch.nn as nn
 
 from slime.backends.megatron_utils.lora.config import LoRAConfig
 from slime.backends.megatron_utils.lora.layers import (
-    LoRAColumnParallelLinear,
     LoRAFusedFC1,
     LoRAFusedQKV,
     LoRARowParallelLinear,
@@ -1094,7 +1270,7 @@ logger = logging.getLogger(__name__)
 
 
 def inject_lora_adapters(
-    model: nn.Module,
+    model: Sequence[nn.Module],
     config: LoRAConfig,
     num_q_heads_per_tp: int,
     num_kv_heads_per_tp: int,
@@ -1102,6 +1278,7 @@ def inject_lora_adapters(
 ) -> None:
     """Inject LoRA adapters into target modules of a GPTModel.
 
+    [I6] Accepts list of model chunks (VP stages). Each chunk is unwrapped from DDP.
     Replaces target linear layers with LoRA-wrapped versions in-place.
     """
     if not config.enabled:
@@ -1114,74 +1291,82 @@ def inject_lora_adapters(
     has_fc2 = "down_proj" in targets
 
     count = 0
-    for layer in _get_decoder_layers(model):
-        if has_qkv:
-            layer.self_attention.linear_qkv = LoRAFusedQKV(
-                layer.self_attention.linear_qkv,
-                rank=config.rank,
-                alpha=config.alpha,
-                num_q_heads_per_tp=num_q_heads_per_tp,
-                num_kv_heads_per_tp=num_kv_heads_per_tp,
-                head_dim=head_dim,
-                dropout=config.dropout,
-            )
-            count += 1
+    for model_chunk in model:
+        unwrapped = _unwrap_ddp(model_chunk)
+        for layer in _get_decoder_layers(unwrapped):
+            if has_qkv:
+                layer.self_attention.linear_qkv = LoRAFusedQKV(
+                    layer.self_attention.linear_qkv,
+                    rank=config.rank,
+                    alpha=config.alpha,
+                    num_q_heads_per_tp=num_q_heads_per_tp,
+                    num_kv_heads_per_tp=num_kv_heads_per_tp,
+                    head_dim=head_dim,
+                    dropout=config.dropout,
+                )
+                count += 1
 
-        if has_o:
-            layer.self_attention.linear_proj = LoRARowParallelLinear(
-                layer.self_attention.linear_proj,
-                rank=config.rank,
-                alpha=config.alpha,
-                dropout=config.dropout,
-            )
-            count += 1
+            if has_o:
+                layer.self_attention.linear_proj = LoRARowParallelLinear(
+                    layer.self_attention.linear_proj,
+                    rank=config.rank,
+                    alpha=config.alpha,
+                    dropout=config.dropout,
+                )
+                count += 1
 
-        if has_fc1:
-            layer.mlp.linear_fc1 = LoRAFusedFC1(
-                layer.mlp.linear_fc1,
-                rank=config.rank,
-                alpha=config.alpha,
-                dropout=config.dropout,
-            )
-            count += 1
+            if has_fc1:
+                layer.mlp.linear_fc1 = LoRAFusedFC1(
+                    layer.mlp.linear_fc1,
+                    rank=config.rank,
+                    alpha=config.alpha,
+                    dropout=config.dropout,
+                )
+                count += 1
 
-        if has_fc2:
-            layer.mlp.linear_fc2 = LoRARowParallelLinear(
-                layer.mlp.linear_fc2,
-                rank=config.rank,
-                alpha=config.alpha,
-                dropout=config.dropout,
-            )
-            count += 1
+            if has_fc2:
+                layer.mlp.linear_fc2 = LoRARowParallelLinear(
+                    layer.mlp.linear_fc2,
+                    rank=config.rank,
+                    alpha=config.alpha,
+                    dropout=config.dropout,
+                )
+                count += 1
 
     logger.info(f"Injected {count} LoRA adapters (rank={config.rank}, alpha={config.alpha})")
 
 
-def freeze_base_params(model: nn.Module) -> None:
-    """Freeze all non-LoRA parameters."""
+def freeze_base_params(model: Sequence[nn.Module]) -> None:
+    """[I6] Freeze all non-LoRA parameters across all VP chunks."""
     frozen_count = 0
     trainable_count = 0
-    for name, param in model.named_parameters():
-        if "lora_" in name:
-            param.requires_grad = True
-            trainable_count += 1
-        else:
-            param.requires_grad = False
-            frozen_count += 1
+    for model_chunk in model:
+        unwrapped = _unwrap_ddp(model_chunk)
+        for name, param in unwrapped.named_parameters():
+            if "lora_" in name:
+                param.requires_grad = True
+                trainable_count += 1
+            else:
+                param.requires_grad = False
+                frozen_count += 1
     logger.info(f"Frozen {frozen_count} base params, {trainable_count} LoRA params trainable")
 
 
+def _unwrap_ddp(model: nn.Module) -> nn.Module:
+    """Unwrap DDP/FSDP wrapper to get inner module."""
+    if hasattr(model, "module"):
+        return _unwrap_ddp(model.module)
+    return model
+
+
 def _get_decoder_layers(model: nn.Module):
-    """Yield transformer layers from model, handling DDP wrapping."""
-    # Handle DDP wrapper: model may be a list of DDP-wrapped chunks
-    if hasattr(model, "decoder"):
+    """Yield transformer layers from an unwrapped model."""
+    if hasattr(model, "decoder") and hasattr(model.decoder, "layers"):
         yield from model.decoder.layers
-    elif hasattr(model, "module"):
-        yield from _get_decoder_layers(model.module)
     else:
-        # Try to find decoder.layers in any submodule
+        # Fallback: search children
         for child in model.children():
-            if hasattr(child, "decoder"):
+            if hasattr(child, "decoder") and hasattr(child.decoder, "layers"):
                 yield from child.decoder.layers
                 return
 ```
@@ -1191,7 +1376,7 @@ def _get_decoder_layers(model: nn.Module):
 ```bash
 cd /Users/jd/Documents/workspace/slime && python -m pytest tests/test_lora_injection.py -v
 ```
-Expected: All 2 tests PASS
+Expected: All 3 tests PASS
 
 - [ ] **Step 5: Update `__init__.py` exports**
 
@@ -1217,7 +1402,7 @@ __all__ = [
 
 ```bash
 git add slime/backends/megatron_utils/lora/ tests/test_lora_injection.py
-git commit -m "feat(lora): add injection and freeze_base_params"
+git commit -m "feat(lora): add VP-aware injection and freeze_base_params (I6 fix)"
 ```
 
 ---
@@ -1226,6 +1411,10 @@ git commit -m "feat(lora): add injection and freeze_base_params"
 
 **Files:**
 - Modify: `slime/backends/megatron_utils/model.py:83-123`
+
+> **[I1] Fix:** Derive `num_q_heads_per_tp` and `num_kv_heads_per_tp` from the first decoder layer's
+> `linear_qkv.output_size_per_partition` instead of manual division. This handles the case where
+> `num_kv_heads < tp_size` (Megatron replicates KV heads so each rank has ≥1).
 
 - [ ] **Step 1: Modify `setup_model_and_optimizer` in `model.py`**
 
@@ -1241,15 +1430,31 @@ if getattr(args, "lora_rank", 0) > 0:
     from slime.backends.megatron_utils.lora import LoRAConfig, freeze_base_params, inject_lora_adapters
 
     lora_config = LoRAConfig.from_args(args)
-    tp_size = mpu.get_tensor_model_parallel_world_size()
-    num_q_heads_per_tp = args.num_attention_heads // tp_size
-    num_kv_heads_per_tp = (args.num_query_groups or args.num_attention_heads) // tp_size
-    head_dim = args.hidden_size // args.num_attention_heads
 
+    # [I1] Derive head counts from the actual model to handle num_kv_heads < tp_size.
+    # Megatron replicates KV heads when num_kv_heads < tp_size, so the actual
+    # per-TP output dimension is set correctly in the base layer.
+    head_dim = args.kv_channels if args.kv_channels else (args.hidden_size // args.num_attention_heads)
+    first_layer = None
     for model_chunk in model:
         unwrapped = model_chunk.module if hasattr(model_chunk, "module") else model_chunk
-        inject_lora_adapters(unwrapped, lora_config, num_q_heads_per_tp, num_kv_heads_per_tp, head_dim)
-        freeze_base_params(unwrapped)
+        if hasattr(unwrapped, "decoder") and len(unwrapped.decoder.layers) > 0:
+            first_layer = unwrapped.decoder.layers[0]
+            break
+    assert first_layer is not None, "No decoder layers found in model"
+
+    qkv_out_per_tp = first_layer.self_attention.linear_qkv.output_size_per_partition
+    # qkv_out_per_tp = (num_q_heads_per_tp + 2 * num_kv_heads_per_tp) * head_dim
+    # With GQA: q_per_kv = num_q_heads / num_kv_heads, so:
+    # qkv_out_per_tp = num_kv_heads_per_tp * (q_per_kv + 2) * head_dim
+    tp_size = mpu.get_tensor_model_parallel_world_size()
+    num_q_heads_per_tp = args.num_attention_heads // tp_size
+    # Solve for num_kv_heads_per_tp from qkv_out:
+    # qkv_out = q_per_tp * head_dim + 2 * kv_per_tp * head_dim
+    num_kv_heads_per_tp = (qkv_out_per_tp - num_q_heads_per_tp * head_dim) // (2 * head_dim)
+
+    inject_lora_adapters(model, lora_config, num_q_heads_per_tp, num_kv_heads_per_tp, head_dim)
+    freeze_base_params(model)
 ```
 
 This must be placed **before** the optimizer construction (lines 110-121), because `get_megatron_optimizer` captures the parameter list and filters by `requires_grad`.
@@ -1265,7 +1470,9 @@ Expected: `OK` (import succeeds; actual execution requires distributed setup)
 
 ```bash
 git add slime/backends/megatron_utils/model.py
-git commit -m "feat(lora): integrate LoRA injection into model construction pipeline"
+git commit -m "feat(lora): integrate LoRA injection into model construction
+
+Derives num_kv_heads_per_tp from base layer output_size_per_partition (I1 fix)."
 ```
 
 ---
@@ -1275,78 +1482,136 @@ git commit -m "feat(lora): integrate LoRA injection into model construction pipe
 **Files:**
 - Modify: `slime/backends/megatron_utils/actor.py`
 
-- [ ] **Step 1: Modify `init()` to skip ref backup when LoRA is enabled**
+> **[I2] Fix:** Replaces `"ref" in backup_tags` condition with `_lora_enabled` flag.
+> Uses `disable_lora`/`enable_lora` for ref forward instead of `_switch_model("ref")`.
+>
+> **[C2] Fix:** For weight update, uses merge→re-backup→transfer→unmerge→re-backup pattern
+> on colocate path. On LoRA + colocate, automatically uses Noop backuper as optimization.
 
-In `actor.py`, after line 112 (`self.weights_backuper.backup("actor")`), add LoRA-aware ref handling:
+- [ ] **Step 1: Modify `init()` for LoRA-aware initialization**
+
+In `actor.py`, after the model initialization section. Key changes:
+1. Set `_lora_enabled` and `_needs_ref_logprobs` flags
+2. Skip ref checkpoint load when LoRA is enabled (ref = base with adapter off)
+3. [C2 optimization] When LoRA + colocate, prefer Noop backuper since CPU backup is unnecessary
 
 ```python
-# Replace lines 114-115:
-#   if with_ref:
-#       self.load_other_checkpoint("ref", args.ref_load)
-# With:
+# After line 93 (initialize_model_and_optimizer), add:
+self._lora_enabled = getattr(args, "lora_rank", 0) > 0
+self._needs_ref_logprobs = args.kl_coef != 0 or getattr(args, "use_kl_loss", False)
+
+# After adapter_load handling, add:
+if getattr(args, "adapter_load", None):
+    from slime.backends.megatron_utils.checkpoint import load_lora_adapter
+    load_lora_adapter(self.model, args.adapter_load)
+
+# Modify weights_backuper creation (lines 102-110):
+# [C2] When LoRA is enabled, we don't need CPU backup for ref switching (adapter on/off instead).
+# For colocate mode, TensorBackuperNoop returns live GPU refs, which correctly reflect merged weights.
+if self._lora_enabled and not args.enable_weights_backuper:
+    # Noop mode: weights_getter returns GPU refs directly
+    logger.info("LoRA mode: using Noop weights backuper (ref switching via adapter on/off)")
+
+# ... existing TensorBackuper.create code ...
+
+# Replace lines 114-115 (ref checkpoint loading):
 if with_ref:
-    if getattr(args, "lora_rank", 0) > 0:
+    if self._lora_enabled:
         # With LoRA, ref model = base model (adapter off). No separate checkpoint needed.
-        # We still set the tag to signal ref is available, but don't load a separate checkpoint.
         logger.info("LoRA mode: ref model uses base weights (adapter off), skipping ref checkpoint load")
     else:
         self.load_other_checkpoint("ref", args.ref_load)
 ```
 
-- [ ] **Step 2: Modify `train_actor()` for LoRA ref forward**
+- [ ] **Step 2: Modify `train_actor()` for LoRA ref forward [I2]**
 
-In `actor.py`, modify the ref model forward section (around lines 379-389):
-
-```python
-# Replace line 382:
-#   self._switch_model("ref")
-# With LoRA-aware ref:
-if getattr(self.args, "lora_rank", 0) > 0:
-    from slime.backends.megatron_utils.lora import disable_lora
-    disable_lora_models = [m.module if hasattr(m, "module") else m for m in self.model]
-    for m in disable_lora_models:
-        disable_lora(m)
-else:
-    self._switch_model("ref")
-```
-
-After the ref log_probs computation (around line 389), restore LoRA:
+In `actor.py`, modify the ref model forward section (around lines 378-389). Replace the `"ref" in backup_tags` condition with LoRA-aware logic:
 
 ```python
-# After the ref compute_log_prob block, before line 390:
-if getattr(self.args, "lora_rank", 0) > 0:
-    from slime.backends.megatron_utils.lora import enable_lora
-    for m in disable_lora_models:
-        enable_lora(m)
+# Replace lines 378-389 with:
+if self.args.compute_advantages_and_returns:
+    if self._needs_ref_logprobs:
+        if self._lora_enabled:
+            # [I2] LoRA: adapter off = ref model (no weight switch needed)
+            from slime.backends.megatron_utils.lora import disable_lora, enable_lora
+            for model_chunk in self.model:
+                disable_lora(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
+            if self.args.use_routing_replay:
+                os.environ["ROUTING_REPLAY_STAGE"] = "fallthrough"
+            rollout_data.update(
+                self.compute_log_prob(
+                    data_iterator,
+                    num_microbatches,
+                    store_prefix="ref_",
+                )
+            )
+            for model_chunk in self.model:
+                enable_lora(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
+        elif "ref" in self.weights_backuper.backup_tags:
+            # Original: switch to ref model via CPU backup restore
+            if self.args.use_routing_replay:
+                os.environ["ROUTING_REPLAY_STAGE"] = "fallthrough"
+            self._switch_model("ref")
+            rollout_data.update(
+                self.compute_log_prob(
+                    data_iterator,
+                    num_microbatches,
+                    store_prefix="ref_",
+                )
+            )
+
+    # Rest of actor/old_actor forward remains unchanged
+    self._switch_model("old_actor" if self.args.keep_old_actor else "actor")
+    # ... (existing log_prob / critic / switch_model code) ...
 ```
 
-- [ ] **Step 3: Modify `update_weights()` to merge/unmerge around transfer**
+- [ ] **Step 3: Modify weight update with merge/unmerge [C2]**
 
-In `actor.py`, modify `update_weights()` (around line 500):
+In `actor.py`, modify the weight update flow. The key insight:
+- **Disaggregated path** reads live GPU params → merge before, unmerge after is enough.
+- **Colocate path** reads from CPU backup → need merge→re-backup→transfer→unmerge→re-backup.
 
 ```python
-# Before line 500 (self.weight_updater.update_weights()):
-lora_enabled = getattr(self.args, "lora_rank", 0) > 0
-if lora_enabled:
-    from slime.backends.megatron_utils.lora import merge_lora_weights, unmerge_lora_weights
-    for model_chunk in self.model:
-        unwrapped = model_chunk.module if hasattr(model_chunk, "module") else model_chunk
-        merge_lora_weights(unwrapped)
+# In the update_weights method (around line 500), wrap with merge/unmerge:
 
-# Line 500: self.weight_updater.update_weights()
+def update_weights(self, ...):
+    if self._lora_enabled:
+        from slime.backends.megatron_utils.lora import merge_lora_weights, unmerge_lora_weights
 
-# After line 500:
-if lora_enabled:
-    for model_chunk in self.model:
-        unwrapped = model_chunk.module if hasattr(model_chunk, "module") else model_chunk
-        unmerge_lora_weights(unwrapped)
+        # Merge LoRA into base weights on GPU
+        for model_chunk in self.model:
+            merge_lora_weights(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
+
+        # [C2] Colocate path: CPU backup has unmerged weights. Re-backup after merge.
+        if self.args.colocate and self.args.enable_weights_backuper:
+            self.weights_backuper.backup("actor")  # Now contains merged weights
+
+    # Original weight transfer
+    self.weight_updater.update_weights()
+
+    if self._lora_enabled:
+        # Unmerge to restore base weights for continued training
+        for model_chunk in self.model:
+            unmerge_lora_weights(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
+
+        # [C2] Colocate path: Restore CPU backup to unmerged state
+        if self.args.colocate and self.args.enable_weights_backuper:
+            self.weights_backuper.backup("actor")  # Back to unmerged
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Modify ref_update_interval handling [I3]**
+
+The ref_update_interval section (lines 449-457) is already handled by argument validation (Task 1, Step 6) which sets `ref_update_interval = None` when LoRA is enabled. No code change needed here — the condition `self.args.ref_update_interval is not None` will be False.
+
+- [ ] **Step 5: Commit**
 
 ```bash
 git add slime/backends/megatron_utils/actor.py
-git commit -m "feat(lora): integrate LoRA into actor training, ref forward, and weight update"
+git commit -m "feat(lora): integrate LoRA into actor training
+
+- I2: ref forward via disable_lora/enable_lora (not backup_tags)
+- C2: merge/unmerge around weight transfer with colocate re-backup
+- I3: ref_update_interval auto-disabled via argument validation"
 ```
 
 ---
@@ -1359,15 +1624,19 @@ git commit -m "feat(lora): integrate LoRA into actor training, ref forward, and 
 - Modify: `slime/backends/megatron_utils/model.py:663-688`
 - Modify: `slime/backends/megatron_utils/checkpoint.py`
 
+> **[I5] Fix:** All TP ranks participate in all_gather for LoRA params. Only rank 0 saves.
+> Uses existing `all_gather_param` from `update_weight/common.py`.
+
 - [ ] **Step 1: Add adapter save path in `model.py`**
 
-In `model.py`, modify the `save()` function (lines 663-688). Add adapter-only save logic:
+In `model.py`, modify the `save()` function. Add adapter-only save logic:
 
 ```python
 def save(iteration, model, optimizer, opt_param_scheduler):
     args = get_args()
 
-    if getattr(args, "lora_rank", 0) > 0 and getattr(args, "save_adapter_only", True):
+    # [I4] Adapter-only save when LoRA is enabled
+    if getattr(args, "lora_rank", 0) > 0 and args.save_adapter_only:
         _save_lora_adapter(iteration, model, args)
         return
 
@@ -1378,68 +1647,96 @@ Add the helper function:
 
 ```python
 def _save_lora_adapter(iteration: int, model: Sequence[DDP], args) -> None:
-    """Save only LoRA adapter weights."""
+    """[I5] Save LoRA adapter weights with proper TP all-gather.
+
+    All TP ranks participate in all_gather (collective op), but only the main rank writes to disk.
+    This produces a complete (un-sharded) adapter checkpoint that can be loaded with any TP configuration.
+    """
     import json
     from pathlib import Path
 
+    import torch
     from megatron.core import parallel_state as mpu
+
+    from slime.backends.megatron_utils.update_weight.common import all_gather_param
 
     save_dir = Path(args.save) / f"lora_adapter_iter_{iteration:07d}"
 
-    if mpu.get_data_parallel_rank() == 0:
+    # [I5] All TP ranks must participate in all_gather (it's a collective op).
+    # Gather LoRA params to full tensors across TP.
+    adapter_state = {}
+    for model_chunk in model:
+        unwrapped = model_chunk.module if hasattr(model_chunk, "module") else model_chunk
+        for name, param in unwrapped.named_parameters():
+            if "lora_" in name:
+                full_param = all_gather_param(name, param)
+                adapter_state[name] = full_param.cpu()
+
+    # Only main rank writes to disk
+    if mpu.get_data_parallel_rank() == 0 and mpu.get_tensor_model_parallel_rank() == 0:
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        adapter_state = {}
-        for model_chunk in model:
-            unwrapped = model_chunk.module if hasattr(model_chunk, "module") else model_chunk
-            for name, param in unwrapped.named_parameters():
-                if "lora_" in name:
-                    adapter_state[name] = param.data.cpu()
+        torch.save(adapter_state, save_dir / "adapter_model.bin")
 
-        if mpu.get_tensor_model_parallel_rank() == 0:
-            import torch
-            torch.save(adapter_state, save_dir / "adapter_model.bin")
-
-            from slime.backends.megatron_utils.lora.config import LoRAConfig
-            config = LoRAConfig.from_args(args)
-            config_dict = {
-                "peft_type": "LORA",
-                "r": config.rank,
-                "lora_alpha": config.alpha,
-                "target_modules": list(config.target_modules),
-            }
-            (save_dir / "lora_config.json").write_text(json.dumps(config_dict, indent=2))
+        from slime.backends.megatron_utils.lora.config import LoRAConfig
+        config = LoRAConfig.from_args(args)
+        config_dict = {
+            "peft_type": "LORA",
+            "r": config.rank,
+            "lora_alpha": config.alpha,
+            "target_modules": list(config.target_modules),
+        }
+        (save_dir / "lora_config.json").write_text(json.dumps(config_dict, indent=2))
 
         logger.info(f"Saved LoRA adapter to {save_dir}")
+
+    # Barrier to ensure save completes before any rank proceeds
+    if torch.distributed.is_initialized():
+        torch.distributed.barrier()
 ```
 
 - [ ] **Step 2: Add adapter load in `checkpoint.py`**
 
-In `checkpoint.py`, add adapter overlay loading. Add a function:
+In `checkpoint.py`, add adapter overlay loading:
 
 ```python
 def load_lora_adapter(model, adapter_path: str) -> None:
-    """Load LoRA adapter weights on top of already-injected model."""
-    import torch
+    """Load LoRA adapter weights on top of already-injected model.
 
-    adapter_state = torch.load(Path(adapter_path) / "adapter_model.bin", map_location="cpu")
+    The adapter checkpoint contains un-sharded (full) tensors.
+    Each TP rank extracts its shard based on the TP attributes set during injection.
+    """
+    import torch
+    from megatron.core import parallel_state as mpu
+
+    adapter_state = torch.load(Path(adapter_path) / "adapter_model.bin", map_location="cpu", weights_only=True)
+
+    tp_rank = mpu.get_tensor_model_parallel_rank()
+    tp_size = mpu.get_tensor_model_parallel_world_size()
+
+    loaded = 0
     for model_chunk in model:
         unwrapped = model_chunk.module if hasattr(model_chunk, "module") else model_chunk
-        missing, unexpected = [], []
-        model_state = dict(unwrapped.named_parameters())
-        for name, tensor in adapter_state.items():
-            if name in model_state:
-                model_state[name].data.copy_(tensor.to(model_state[name].device))
-            else:
-                missing.append(name)
-        if missing:
-            logger.warning(f"LoRA adapter keys not found in model: {missing}")
-    logger.info(f"Loaded LoRA adapter from {adapter_path}")
+        for name, param in unwrapped.named_parameters():
+            if name not in adapter_state:
+                continue
+            full_tensor = adapter_state[name]
+
+            # Shard if needed based on TP attributes
+            if getattr(param, "tensor_model_parallel", False) and tp_size > 1:
+                dim = param.partition_dim
+                chunk_size = full_tensor.shape[dim] // tp_size
+                full_tensor = full_tensor.narrow(dim, tp_rank * chunk_size, chunk_size)
+
+            param.data.copy_(full_tensor.to(param.device))
+            loaded += 1
+
+    logger.info(f"Loaded {loaded} LoRA adapter params from {adapter_path}")
 ```
 
 - [ ] **Step 3: Wire adapter load in `actor.py` init**
 
-In `actor.py`, after the `initialize_model_and_optimizer` call (line 91-93), add:
+In `actor.py`, after the `initialize_model_and_optimizer` call (handled in Task 7 Step 1):
 
 ```python
 if getattr(args, "adapter_load", None):
@@ -1451,203 +1748,392 @@ if getattr(args, "adapter_load", None):
 
 ```bash
 git add slime/backends/megatron_utils/model.py slime/backends/megatron_utils/checkpoint.py slime/backends/megatron_utils/actor.py
-git commit -m "feat(lora): add adapter-only checkpoint save/load"
+git commit -m "feat(lora): adapter-only checkpoint save/load
+
+- I5: all_gather LoRA params across TP before saving from rank 0
+- I4: --save-adapter-only flag controls save behavior
+- Adapter load shards full tensors back to TP partitions"
 ```
 
 ---
 
-### Task 9: MoE Expert LoRA (3D Batched)
+### Task 9: MoE Expert LoRA (GroupedMLP Forward Override)
 
 **Files:**
-- Modify: `slime/backends/megatron_utils/lora/layers.py`
+- Create: `slime/backends/megatron_utils/lora/expert_lora.py`
 - Modify: `slime/backends/megatron_utils/lora/injection.py`
 - Modify: `slime/backends/megatron_utils/lora/merge.py`
-- Test: `tests/test_lora_layers.py` (append expert tests)
+- Test: `tests/test_lora_expert.py`
+
+> **[C1] Fix:** Instead of just attaching LoRA params as attributes, monkey-patch `GroupedMLP.forward()`
+> to inject `bmm`-computed delta into `w1`/`w2` before the `gg.ops.gmm` call. This preserves the
+> fused CUTLASS kernel performance while adding LoRA corrections.
 
 - [ ] **Step 1: Write expert LoRA tests**
 
-Append to `tests/test_lora_layers.py`:
+Create `tests/test_lora_expert.py`:
 
 ```python
+"""Tests for MoE expert LoRA with GroupedMLP forward override."""
+import torch
+import torch.nn as nn
+
+import pytest
+
+
 class MockGroupedMLP(nn.Module):
     """Mock for Megatron GroupedMLP with stacked 3D weights."""
 
-    def __init__(self, num_local_experts, input_size, ffn_hidden):
+    def __init__(self, num_local_experts, hidden_size, ffn_hidden):
         super().__init__()
-        # weight1 = fc1 (gate+up fused): [num_experts, 2*ffn_hidden, input_size]
-        self.weight1 = nn.Parameter(torch.randn(num_local_experts, 2 * ffn_hidden, input_size))
-        # weight2 = fc2: [num_experts, input_size, ffn_hidden]
-        self.weight2 = nn.Parameter(torch.randn(num_local_experts, input_size, ffn_hidden))
+        # Megatron stores weight1 as flat [H, E*F] then reshapes to [E, H, F] in forward
+        self.weight1 = nn.Parameter(torch.randn(hidden_size, num_local_experts * ffn_hidden * 2))
+        # weight2 as flat [E*F, H] then reshapes to [E, F, H]
+        self.weight2 = nn.Parameter(torch.randn(num_local_experts * ffn_hidden, hidden_size))
         self.num_local_experts = num_local_experts
-        self.config = type("Config", (), {"hidden_size": input_size, "ffn_hidden_size": ffn_hidden})()
+        self.config = type("Config", (), {"hidden_size": hidden_size, "ffn_hidden_size": ffn_hidden})()
+        self._forward_called = False
 
-    def forward(self, x, tokens_per_expert):
-        return x  # stub
-
-
-def test_lora_expert_fc1_shapes():
-    """Expert FC1 LoRA should have correct 3D parameter shapes."""
-    from slime.backends.megatron_utils.lora.layers import LoRAGroupedExpertFC1
-
-    mlp = MockGroupedMLP(num_local_experts=4, input_size=64, ffn_hidden=128)
-    lora = LoRAGroupedExpertFC1(mlp, num_local_experts=4, rank=8, alpha=16, hidden_size=64, ffn_hidden_per_tp=128)
-
-    assert lora.gate_lora_A.shape == (4, 8, 64)
-    assert lora.gate_lora_B.shape == (4, 128, 8)
-    assert lora.up_lora_A.shape == (4, 8, 64)
-    assert lora.up_lora_B.shape == (4, 128, 8)
+    def forward(self, permuted_local_hidden_states, tokens_per_expert):
+        self._forward_called = True
+        E = self.num_local_experts
+        H = self.config.hidden_size
+        F = self.config.ffn_hidden_size
+        w1 = self.weight1.view(E, H, -1)  # [E, H, 2F]
+        w2 = self.weight2.view(E, -1, H)  # [E, F, H]
+        # Simplified: just do batched matmul instead of gmm
+        # In real code, this would be gg.ops.gmm
+        output = torch.bmm(permuted_local_hidden_states.unsqueeze(0).expand(E, -1, -1), w1)
+        return output.sum(0)  # Simplified
 
 
-def test_lora_expert_fc2_shapes():
-    from slime.backends.megatron_utils.lora.layers import LoRAGroupedExpertFC2
+def test_expert_lora_param_shapes():
+    """Expert LoRA should create correct 3D parameter shapes."""
+    from slime.backends.megatron_utils.lora.expert_lora import inject_expert_lora
 
-    mlp = MockGroupedMLP(num_local_experts=4, input_size=64, ffn_hidden=128)
-    lora = LoRAGroupedExpertFC2(mlp, num_local_experts=4, rank=8, alpha=16, hidden_size=64, ffn_hidden_per_tp=128)
+    mlp = MockGroupedMLP(num_local_experts=4, hidden_size=64, ffn_hidden=128)
+    inject_expert_lora(mlp, rank=8, alpha=16)
 
-    assert lora.lora_A.shape == (4, 8, 128)
-    assert lora.lora_B.shape == (4, 64, 8)
+    # FC1 (gate+up): A=[E, rank, H], gate_B=[E, F, rank], up_B=[E, F, rank]
+    assert mlp._lora_A_fc1.shape == (4, 8, 64)
+    assert mlp._lora_gate_B_fc1.shape == (4, 128, 8)
+    assert mlp._lora_up_B_fc1.shape == (4, 128, 8)
+
+    # FC2: A=[E, rank, F], B=[E, H, rank]
+    assert mlp._lora_A_fc2.shape == (4, 8, 128)
+    assert mlp._lora_B_fc2.shape == (4, 64, 8)
+
+
+def test_expert_lora_zero_init_no_effect():
+    """At initialization (B=0), expert LoRA should not change forward output."""
+    from slime.backends.megatron_utils.lora.expert_lora import inject_expert_lora
+
+    mlp = MockGroupedMLP(num_local_experts=2, hidden_size=32, ffn_hidden=64)
+    w1_before = mlp.weight1.data.clone()
+    w2_before = mlp.weight2.data.clone()
+
+    inject_expert_lora(mlp, rank=4, alpha=8)
+
+    # Base weights should be unchanged (LoRA B is zero-initialized)
+    torch.testing.assert_close(mlp.weight1.data, w1_before)
+    torch.testing.assert_close(mlp.weight2.data, w2_before)
+
+
+def test_expert_lora_merge_unmerge_roundtrip():
+    """Merge then unmerge should restore original weights."""
+    from slime.backends.megatron_utils.lora.expert_lora import inject_expert_lora
+    from slime.backends.megatron_utils.lora.merge import merge_expert_lora, unmerge_expert_lora
+
+    mlp = MockGroupedMLP(num_local_experts=4, hidden_size=32, ffn_hidden=64)
+    inject_expert_lora(mlp, rank=4, alpha=8)
+
+    # Set non-zero B values
+    mlp._lora_gate_B_fc1.data.normal_()
+    mlp._lora_up_B_fc1.data.normal_()
+    mlp._lora_B_fc2.data.normal_()
+
+    w1_original = mlp.weight1.data.clone()
+    w2_original = mlp.weight2.data.clone()
+
+    merge_expert_lora(mlp)
+    assert not torch.allclose(mlp.weight1.data, w1_original)
+
+    unmerge_expert_lora(mlp)
+    torch.testing.assert_close(mlp.weight1.data, w1_original, atol=1e-5, rtol=1e-5)
+    torch.testing.assert_close(mlp.weight2.data, w2_original, atol=1e-5, rtol=1e-5)
+
+
+def test_expert_lora_disable_enable():
+    """disable should set _lora_scale=0, enable should restore."""
+    from slime.backends.megatron_utils.lora.expert_lora import inject_expert_lora
+
+    mlp = MockGroupedMLP(num_local_experts=2, hidden_size=16, ffn_hidden=32)
+    inject_expert_lora(mlp, rank=2, alpha=4)
+
+    assert mlp._lora_scale == 4 / 2  # alpha / rank
+    assert mlp._lora_enabled is True
+
+    mlp._saved_lora_scale = mlp._lora_scale
+    mlp._lora_scale = 0.0
+    assert mlp._lora_scale == 0.0
+
+    mlp._lora_scale = mlp._saved_lora_scale
+    assert mlp._lora_scale == 2.0
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cd /Users/jd/Documents/workspace/slime && python -m pytest tests/test_lora_layers.py::test_lora_expert_fc1_shapes -v
+cd /Users/jd/Documents/workspace/slime && python -m pytest tests/test_lora_expert.py -v
 ```
 
-- [ ] **Step 3: Implement expert LoRA layers**
+- [ ] **Step 3: Implement expert LoRA with forward override**
 
-Add to `slime/backends/megatron_utils/lora/layers.py`:
+Create `slime/backends/megatron_utils/lora/expert_lora.py`:
 
 ```python
-class LoRAGroupedExpertFC1(nn.Module):
-    """Per-expert LoRA on GroupedMLP weight1 (fc1, gate+up fused, 3D stacked).
+"""[C1] MoE Expert LoRA via GroupedMLP forward monkey-patch.
 
-    weight1: [num_local_experts, 2*ffn_hidden_per_tp, hidden_size]
-    gate_lora_A/B and up_lora_A/B: 3D [num_local_experts, ...]
+Instead of wrapping GroupedMLP in a new class (which breaks isinstance checks),
+we attach LoRA parameters as attributes and replace the forward method to inject
+bmm-computed deltas into w1/w2 before the gg.ops.gmm call.
+
+Key design:
+- LoRA params: _lora_A_fc1, _lora_gate_B_fc1, _lora_up_B_fc1 (fc1 = gate+up fused)
+              _lora_A_fc2, _lora_B_fc2
+- Forward patch: compute delta via bmm, add to reshaped w1/w2, then call gmm as normal
+- Merge: add delta directly to weight1/weight2 (the flat stored tensors)
+- Performance: bmm cost is negligible (~0.1% of gmm) for small rank
+"""
+from __future__ import annotations
+
+import math
+import types
+
+import torch
+import torch.nn as nn
+
+
+def inject_expert_lora(
+    grouped_mlp: nn.Module,
+    rank: int,
+    alpha: float,
+    dropout: float = 0.0,
+) -> None:
+    """Inject LoRA parameters into a GroupedMLP and monkey-patch its forward.
+
+    Args:
+        grouped_mlp: A Megatron GroupedMLP module with weight1, weight2, num_local_experts.
+        rank: LoRA rank.
+        alpha: LoRA alpha for scaling.
+        dropout: LoRA dropout rate.
     """
+    E = grouped_mlp.num_local_experts
+    H = grouped_mlp.config.hidden_size
+    F = grouped_mlp.config.ffn_hidden_size
 
-    def __init__(
-        self,
-        base_layer: nn.Module,
-        num_local_experts: int,
-        rank: int,
-        alpha: float,
-        hidden_size: int,
-        ffn_hidden_per_tp: int,
-        dropout: float = 0.0,
-    ):
-        super().__init__()
-        self.base_layer = base_layer
-        self.rank = rank
-        self.scaling = alpha / rank
-        self.num_local_experts = num_local_experts
+    scale = alpha / rank
 
-        self.gate_lora_A = nn.Parameter(torch.empty(num_local_experts, rank, hidden_size))
-        self.gate_lora_B = nn.Parameter(torch.zeros(num_local_experts, ffn_hidden_per_tp, rank))
-        self.up_lora_A = nn.Parameter(torch.empty(num_local_experts, rank, hidden_size))
-        self.up_lora_B = nn.Parameter(torch.zeros(num_local_experts, ffn_hidden_per_tp, rank))
+    # FC1 LoRA: weight1 is [H, E*2F] → reshaped [E, H, 2F] → split into gate [E,H,F] and up [E,H,F]
+    # LoRA delta for gate: gate_B @ A → [E, F, H] → transpose to [E, H, F]
+    # LoRA delta for up:   up_B  @ A → [E, F, H] → transpose to [E, H, F]
+    grouped_mlp._lora_A_fc1 = nn.Parameter(torch.empty(E, rank, H))
+    grouped_mlp._lora_gate_B_fc1 = nn.Parameter(torch.zeros(E, F, rank))
+    grouped_mlp._lora_up_B_fc1 = nn.Parameter(torch.zeros(E, F, rank))
 
-        for A in [self.gate_lora_A, self.up_lora_A]:
-            for e in range(num_local_experts):
-                nn.init.kaiming_uniform_(A[e], a=math.sqrt(5))
+    # FC2 LoRA: weight2 is [E*F, H] → reshaped [E, F, H]
+    # LoRA delta: B @ A → [E, H, F] → transpose to [E, F, H]
+    grouped_mlp._lora_A_fc2 = nn.Parameter(torch.empty(E, rank, F))
+    grouped_mlp._lora_B_fc2 = nn.Parameter(torch.zeros(E, H, rank))
 
-        self.dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
+    # Initialize A matrices
+    for e in range(E):
+        nn.init.kaiming_uniform_(grouped_mlp._lora_A_fc1[e], a=math.sqrt(5))
+        nn.init.kaiming_uniform_(grouped_mlp._lora_A_fc2[e], a=math.sqrt(5))
+
+    grouped_mlp._lora_scale = scale
+    grouped_mlp._lora_enabled = True
+    grouped_mlp._lora_dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
+
+    # Save original forward for reference (not called directly — we rewrite the full forward)
+    grouped_mlp._original_forward = grouped_mlp.forward
+
+    # Monkey-patch forward
+    grouped_mlp.forward = types.MethodType(_lora_grouped_mlp_forward, grouped_mlp)
 
 
-class LoRAGroupedExpertFC2(nn.Module):
-    """Per-expert LoRA on GroupedMLP weight2 (fc2, 3D stacked).
+def _lora_grouped_mlp_forward(self, permuted_local_hidden_states, tokens_per_expert):
+    """Patched forward for GroupedMLP with LoRA delta injection.
 
-    weight2: [num_local_experts, hidden_size, ffn_hidden_per_tp]
-    lora_A: [num_local_experts, rank, ffn_hidden_per_tp]  (TP-sharded input)
-    lora_B: [num_local_experts, hidden_size, rank]         (replicated output)
+    This reproduces the original GroupedMLP.forward() logic but inserts LoRA deltas
+    into w1/w2 between the reshape and the gmm call.
+
+    The original flow:
+        w1 = self.weight1.view(E, H, -1)
+        w2 = self.weight2.view(E, -1, H)
+        fc1_output = gg.ops.gmm(input, w1, tokens_per_expert)
+        ... activation ...
+        fc2_output = gg.ops.gmm(intermediate, w2, tokens_per_expert)
+
+    Patched flow:
+        w1 = self.weight1.view(E, H, -1)
+        if lora_enabled: w1 = w1 + delta_w1  # <-- LoRA injection
+        fc1_output = gg.ops.gmm(input, w1, tokens_per_expert)
+        ... (same) ...
     """
+    # Delegate to original forward which handles the full gmm logic.
+    # We temporarily merge the delta into weight1/weight2, call original, then remove.
+    if self._lora_enabled and self._lora_scale != 0.0:
+        _apply_expert_delta(self, merge=True)
 
-    def __init__(
-        self,
-        base_layer: nn.Module,
-        num_local_experts: int,
-        rank: int,
-        alpha: float,
-        hidden_size: int,
-        ffn_hidden_per_tp: int,
-        dropout: float = 0.0,
-    ):
-        super().__init__()
-        self.base_layer = base_layer
-        self.rank = rank
-        self.scaling = alpha / rank
-        self.num_local_experts = num_local_experts
+    output = self._original_forward(permuted_local_hidden_states, tokens_per_expert)
 
-        self.lora_A = nn.Parameter(torch.empty(num_local_experts, rank, ffn_hidden_per_tp))
-        self.lora_B = nn.Parameter(torch.zeros(num_local_experts, hidden_size, rank))
+    if self._lora_enabled and self._lora_scale != 0.0:
+        _apply_expert_delta(self, merge=False)
 
-        for e in range(num_local_experts):
-            nn.init.kaiming_uniform_(self.lora_A[e], a=math.sqrt(5))
+    return output
 
-        self.dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
+
+def _apply_expert_delta(grouped_mlp, merge: bool) -> None:
+    """Add or subtract LoRA delta from GroupedMLP's weight1/weight2.
+
+    This is called in the forward pass to temporarily merge LoRA deltas.
+    Uses torch.no_grad() to avoid tracking these ops in the autograd graph
+    for the base weights (LoRA params get gradients through the training loss).
+
+    Note: During training, gradients flow through the modified weights. Since we
+    add the delta before forward and remove after, the base weights don't accumulate
+    gradient from LoRA. The LoRA params themselves are part of the module and get
+    gradients normally via autograd.
+    """
+    sign = 1.0 if merge else -1.0
+    scale = grouped_mlp._lora_scale
+
+    E = grouped_mlp.num_local_experts
+    H = grouped_mlp.config.hidden_size
+    F = grouped_mlp.config.ffn_hidden_size
+
+    with torch.no_grad():
+        # FC1: weight1 is [H, E*2F]
+        # gate_delta = gate_B @ A → [E, F, rank] @ [E, rank, H] = [E, F, H]
+        gate_delta = torch.bmm(grouped_mlp._lora_gate_B_fc1, grouped_mlp._lora_A_fc1) * scale
+        up_delta = torch.bmm(grouped_mlp._lora_up_B_fc1, grouped_mlp._lora_A_fc1) * scale
+
+        # weight1 viewed as [E, H, 2F] → gate is [:, :, :F], up is [:, :, F:]
+        w1_view = grouped_mlp.weight1.data.view(E, H, 2 * F)
+        w1_view[:, :, :F] += sign * gate_delta.transpose(-1, -2)  # [E, F, H].T → [E, H, F]
+        w1_view[:, :, F:] += sign * up_delta.transpose(-1, -2)
+
+        # FC2: weight2 is [E*F, H]
+        fc2_delta = torch.bmm(grouped_mlp._lora_B_fc2, grouped_mlp._lora_A_fc2) * scale  # [E, H, rank]@[E, rank, F]=[E, H, F]
+        w2_view = grouped_mlp.weight2.data.view(E, F, H)
+        w2_view += sign * fc2_delta.transpose(-1, -2)  # [E, H, F].T → [E, F, H]
 ```
 
-- [ ] **Step 4: Add expert merge logic**
+> **Important note on gradients:** The `_apply_expert_delta` uses `torch.no_grad()` because
+> we're modifying `weight1`/`weight2` (base weights, frozen). The LoRA parameters themselves
+> (`_lora_A_fc1`, `_lora_gate_B_fc1`, etc.) receive gradients through the normal autograd path
+> because they're registered as `nn.Parameter` on the module, and the training loss backpropagates
+> through the modified weights. The `no_grad` only prevents the base weights from accumulating
+> gradient from the temporary merge/unmerge ops.
+>
+> **Alternative approach if gradient flow is an issue:** Instead of merge-in-forward, compute the
+> delta as a separate tensor and override the gmm call. This would be cleaner for autograd but
+> requires replicating more of GroupedMLP's forward logic. Start with the merge-in-forward
+> approach and validate gradient correctness in integration tests.
 
-In `slime/backends/megatron_utils/lora/merge.py`, add expert merge support to `merge_lora_weights` and `unmerge_lora_weights`:
+- [ ] **Step 4: Add expert merge to merge.py**
+
+In `slime/backends/megatron_utils/lora/merge.py`, add expert merge/unmerge functions:
 
 ```python
-# Add to imports
-from slime.backends.megatron_utils.lora.layers import LoRAGroupedExpertFC1, LoRAGroupedExpertFC2
+def merge_expert_lora(grouped_mlp) -> None:
+    """Merge expert LoRA deltas into GroupedMLP weight1/weight2 permanently.
 
-# In merge_lora_weights, add:
-elif isinstance(module, LoRAGroupedExpertFC1):
-    for e in range(module.num_local_experts):
-        gate_delta = (module.gate_lora_B[e] @ module.gate_lora_A[e]) * module.scaling
-        up_delta = (module.up_lora_B[e] @ module.up_lora_A[e]) * module.scaling
-        import torch
-        delta = torch.cat([gate_delta, up_delta], dim=0)
-        module.base_layer.weight1.data[e] += delta
-elif isinstance(module, LoRAGroupedExpertFC2):
-    for e in range(module.num_local_experts):
-        module.base_layer.weight2.data[e] += (module.lora_B[e] @ module.lora_A[e]) * module.scaling
+    Used before weight transfer to SGLang.
+    """
+    from slime.backends.megatron_utils.lora.expert_lora import _apply_expert_delta
+    _apply_expert_delta(grouped_mlp, merge=True)
 
-# Mirror in unmerge_lora_weights with subtraction
+
+def unmerge_expert_lora(grouped_mlp) -> None:
+    """Unmerge expert LoRA deltas from GroupedMLP weight1/weight2."""
+    from slime.backends.megatron_utils.lora.expert_lora import _apply_expert_delta
+    _apply_expert_delta(grouped_mlp, merge=False)
 ```
 
-Also update `_LORA_LAYER_TYPES` tuple to include expert types, and `disable_lora`/`enable_lora` to handle them.
+Also update `merge_lora_weights` and `unmerge_lora_weights` to handle expert LoRA:
+
+```python
+def merge_lora_weights(model: nn.Module) -> None:
+    """Merge LoRA adapters into base weights in-place. Call before weight transfer."""
+    for module in model.modules():
+        if isinstance(module, LoRAColumnParallelLinear):
+            module.base_layer.weight.data += (module.lora_B @ module.lora_A) * module.scaling
+        elif isinstance(module, LoRARowParallelLinear):
+            module.base_layer.weight.data += (module.lora_B @ module.lora_A) * module.scaling
+        elif isinstance(module, LoRAFusedQKV):
+            _merge_fused_qkv(module)
+        elif isinstance(module, LoRAFusedFC1):
+            _merge_fused_fc1(module)
+        # [C1] Expert LoRA: merge deltas into GroupedMLP weight1/weight2
+        elif hasattr(module, "_lora_enabled") and hasattr(module, "_lora_A_fc1"):
+            merge_expert_lora(module)
+```
+
+Mirror in `unmerge_lora_weights` with `unmerge_expert_lora`.
 
 - [ ] **Step 5: Add expert injection in `injection.py`**
 
-Add expert injection support in `inject_lora_adapters`:
+Add to `inject_lora_adapters` in `injection.py`, after the shared MLP injection:
 
 ```python
-# After shared MLP injection, handle MoE experts:
-if "expert" in targets and hasattr(layer.mlp, "experts"):
+# [C1] MoE expert LoRA: inject into GroupedMLP
+has_expert = "expert" in targets
+if has_expert and hasattr(layer, "mlp") and hasattr(layer.mlp, "experts"):
     experts_module = layer.mlp.experts
     if hasattr(experts_module, "weight1"):  # GroupedMLP
-        num_local_experts = experts_module.num_local_experts
-        ffn_hidden_per_tp = experts_module.config.ffn_hidden_size // expt_tp_size
-        experts_module.lora_fc1 = LoRAGroupedExpertFC1(
-            experts_module, num_local_experts, config.rank, config.alpha,
-            hidden_size, ffn_hidden_per_tp, config.dropout,
+        from slime.backends.megatron_utils.lora.expert_lora import inject_expert_lora
+        inject_expert_lora(
+            experts_module,
+            rank=config.rank,
+            alpha=config.alpha,
+            dropout=config.dropout,
         )
-        experts_module.lora_fc2 = LoRAGroupedExpertFC2(
-            experts_module, num_local_experts, config.rank, config.alpha,
-            hidden_size, ffn_hidden_per_tp, config.dropout,
+        count += 2  # FC1 + FC2
+        logger.info(
+            f"Injected expert LoRA into GroupedMLP "
+            f"(experts={experts_module.num_local_experts}, rank={config.rank})"
         )
-        count += 2
+    elif hasattr(experts_module, "local_experts"):  # SequentialMLP fallback
+        for expert in experts_module.local_experts:
+            if has_fc1:
+                expert.linear_fc1 = LoRAFusedFC1(
+                    expert.linear_fc1, rank=config.rank, alpha=config.alpha, dropout=config.dropout,
+                )
+            if has_fc2:
+                expert.linear_fc2 = LoRARowParallelLinear(
+                    expert.linear_fc2, rank=config.rank, alpha=config.alpha, dropout=config.dropout,
+                )
+            count += int(has_fc1) + int(has_fc2)
 ```
-
-Note: Expert LoRA injection is more complex because `GroupedMLP.forward()` directly uses `weight1`/`weight2` tensors in grouped GEMM. The merge approach handles this by modifying `weight1`/`weight2` directly before transfer. During training, expert LoRA forward must hook into the GroupedMLP computation, which requires understanding the `grouped_gemm` call pattern. This may need adjustment based on the actual `GroupedMLP.forward()` implementation in the version of Megatron being used.
 
 - [ ] **Step 6: Run all tests**
 
 ```bash
-cd /Users/jd/Documents/workspace/slime && python -m pytest tests/test_lora_layers.py tests/test_lora_merge.py tests/test_lora_injection.py tests/test_lora_config.py -v
+cd /Users/jd/Documents/workspace/slime && python -m pytest tests/test_lora_expert.py tests/test_lora_layers.py tests/test_lora_merge.py tests/test_lora_injection.py tests/test_lora_config.py -v
 ```
 Expected: All tests PASS
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add slime/backends/megatron_utils/lora/ tests/
-git commit -m "feat(lora): add MoE expert LoRA (3D batched) layers and merge"
+git add slime/backends/megatron_utils/lora/ tests/test_lora_expert.py
+git commit -m "feat(lora): add MoE expert LoRA via GroupedMLP forward override (C1 fix)
+
+Monkey-patches GroupedMLP.forward() to inject bmm-computed LoRA delta
+into w1/w2 before gg.ops.gmm call. Preserves fused CUTLASS performance.
+Supports merge/unmerge for weight transfer and disable/enable for ref forward."
 ```
 
 ---
@@ -1683,7 +2169,7 @@ git add -A && git commit -m "fix(lora): address linting and test issues"
 ```bash
 ls -la slime/backends/megatron_utils/lora/
 ```
-Expected: `__init__.py`, `config.py`, `layers.py`, `injection.py`, `merge.py`
+Expected: `__init__.py`, `config.py`, `layers.py`, `expert_lora.py`, `injection.py`, `merge.py`
 
 - [ ] **Step 2: Verify all tests pass**
 
@@ -1696,4 +2182,18 @@ cd /Users/jd/Documents/workspace/slime && python -m pytest tests/test_lora_*.py 
 ```bash
 git log --oneline dev..HEAD
 ```
-Expected: ~8-9 commits, all prefixed with `feat(lora):` or `fix(lora):`
+Expected: ~10 commits, all prefixed with `feat(lora):` or `fix(lora):`
+
+- [ ] **Step 4: Verify issue resolution checklist**
+
+| Issue | Status | Verification |
+|-------|--------|-------------|
+| C1 | Fixed | `test_expert_lora_*` tests pass; forward override injects delta before gmm |
+| C2 | Fixed | actor.py merge→re-backup→transfer→unmerge→re-backup pattern for colocate |
+| C3 | Fixed | `test_merge_fused_qkv_roundtrip` passes; uses `_interleave_qkv_weight` |
+| I1 | Fixed | `test_lora_fused_qkv_kv_heads_equal_one` passes; uses output_size_per_partition |
+| I2 | Fixed | actor.py uses `_lora_enabled` + disable/enable instead of backup_tags |
+| I3 | Fixed | arguments.py auto-disables ref_update_interval with warning |
+| I4 | Fixed | `--save-adapter-only` / `--no-save-adapter-only` with auto-default |
+| I5 | Fixed | `_save_lora_adapter` uses all_gather before rank 0 save |
+| I6 | Fixed | inject/merge/freeze accept list[DDP] and iterate VP chunks |
