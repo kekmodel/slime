@@ -86,3 +86,227 @@ class LoRARowParallelLinear(nn.Module):
 
         lora_out = F.linear(F.linear(self.dropout(x), self.lora_A), self.lora_B) * self.scaling
         return base_output + lora_out, bias
+
+
+def _interleave_qkv(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    num_q_heads_per_tp: int,
+    num_kv_heads_per_tp: int,
+    head_dim: int,
+) -> torch.Tensor:
+    """Interleave Q, K, V activation corrections into Megatron's group layout.
+
+    Megatron stores QKV fused as groups: [Q_0, K_0, V_0, Q_1, K_1, V_1, ...]
+    where each group corresponds to a KV head and its associated Q heads.
+
+    Args:
+        q: [..., num_q_heads_per_tp * head_dim]
+        k: [..., num_kv_heads_per_tp * head_dim]
+        v: [..., num_kv_heads_per_tp * head_dim]
+        num_q_heads_per_tp: number of Q heads per TP rank
+        num_kv_heads_per_tp: number of KV heads per TP rank
+        head_dim: dimension per head
+
+    Returns:
+        Interleaved tensor of shape [..., (num_q_heads_per_tp + 2*num_kv_heads_per_tp) * head_dim]
+    """
+    q_per_kv = num_q_heads_per_tp // num_kv_heads_per_tp
+
+    # Reshape to expose head structure
+    prefix = q.shape[:-1]
+    q_heads = q.reshape(*prefix, num_kv_heads_per_tp, q_per_kv * head_dim)
+    k_heads = k.reshape(*prefix, num_kv_heads_per_tp, head_dim)
+    v_heads = v.reshape(*prefix, num_kv_heads_per_tp, head_dim)
+
+    # Concatenate along head dim per KV group: [q_group, k, v]
+    groups = torch.cat([q_heads, k_heads, v_heads], dim=-1)  # [..., num_kv_heads_per_tp, (q_per_kv+2)*head_dim]
+
+    # Flatten back to [..., total_dim]
+    return groups.reshape(*prefix, -1)
+
+
+def _interleave_qkv_weight(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    num_q_heads_per_tp: int,
+    num_kv_heads_per_tp: int,
+    head_dim: int,
+) -> torch.Tensor:
+    """Interleave Q, K, V weight corrections into Megatron's group layout.
+
+    For weight tensors shaped [out_dim, in_dim], interleaves along dim=0.
+
+    Args:
+        q: [num_q_heads_per_tp * head_dim, in_dim]
+        k: [num_kv_heads_per_tp * head_dim, in_dim]
+        v: [num_kv_heads_per_tp * head_dim, in_dim]
+        num_q_heads_per_tp: number of Q heads per TP rank
+        num_kv_heads_per_tp: number of KV heads per TP rank
+        head_dim: dimension per head
+
+    Returns:
+        Interleaved tensor of shape [(num_q_heads_per_tp + 2*num_kv_heads_per_tp) * head_dim, in_dim]
+    """
+    q_per_kv = num_q_heads_per_tp // num_kv_heads_per_tp
+    in_dim = q.shape[1]
+
+    # Reshape to expose head structure along output dim
+    q_heads = q.reshape(num_kv_heads_per_tp, q_per_kv * head_dim, in_dim)
+    k_heads = k.reshape(num_kv_heads_per_tp, head_dim, in_dim)
+    v_heads = v.reshape(num_kv_heads_per_tp, head_dim, in_dim)
+
+    # Concatenate along output head dim per KV group
+    groups = torch.cat([q_heads, k_heads, v_heads], dim=1)  # [num_kv_heads, (q_per_kv+2)*head_dim, in_dim]
+
+    # Flatten back
+    return groups.reshape(-1, in_dim)
+
+
+class LoRAFusedQKV(nn.Module):
+    """LoRA adapter for Megatron's fused QKV ColumnParallelLinear.
+
+    Megatron stores fused QKV weights in group layout:
+        [Q_0, K_0, V_0, Q_1, K_1, V_1, ...] per KV head group.
+
+    We use separate Q, K, V LoRA adapters and interleave their corrections
+    to match the fused layout before adding to the base output.
+
+    All lora_B parameters follow ColumnParallelLinear sharding (partition_dim=0).
+    All lora_A parameters are replicated.
+    """
+
+    def __init__(
+        self,
+        base_layer: nn.Module,
+        rank: int,
+        alpha: float,
+        num_q_heads_per_tp: int,
+        num_kv_heads_per_tp: int,
+        head_dim: int,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        self.base_layer = base_layer
+        self.rank = rank
+        self.scaling = alpha / rank
+        self.num_q_heads_per_tp = num_q_heads_per_tp
+        self.num_kv_heads_per_tp = num_kv_heads_per_tp
+        self.head_dim = head_dim
+
+        input_size = base_layer.input_size
+        q_out = num_q_heads_per_tp * head_dim
+        kv_out = num_kv_heads_per_tp * head_dim
+
+        # Q adapter
+        self.lora_A_q = nn.Parameter(torch.empty(rank, input_size))
+        self.lora_B_q = nn.Parameter(torch.zeros(q_out, rank))
+        nn.init.kaiming_uniform_(self.lora_A_q, a=math.sqrt(5))
+
+        # K adapter
+        self.lora_A_k = nn.Parameter(torch.empty(rank, input_size))
+        self.lora_B_k = nn.Parameter(torch.zeros(kv_out, rank))
+        nn.init.kaiming_uniform_(self.lora_A_k, a=math.sqrt(5))
+
+        # V adapter
+        self.lora_A_v = nn.Parameter(torch.empty(rank, input_size))
+        self.lora_B_v = nn.Parameter(torch.zeros(kv_out, rank))
+        nn.init.kaiming_uniform_(self.lora_A_v, a=math.sqrt(5))
+
+        self.dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
+
+        # TP attributes: all B matrices sharded on dim=0 (column parallel)
+        for param in (self.lora_B_q, self.lora_B_k, self.lora_B_v):
+            param.tensor_model_parallel = True
+            param.partition_dim = 0
+            param.partition_stride = 1
+
+        # A matrices are replicated
+        for param in (self.lora_A_q, self.lora_A_k, self.lora_A_v):
+            param.tensor_model_parallel = False
+
+    def forward(self, x, **kwargs):
+        base_out = self.base_layer(x, **kwargs)
+        if isinstance(base_out, tuple):
+            base_output, bias = base_out
+        else:
+            base_output, bias = base_out, None
+
+        dropped = self.dropout(x)
+
+        q_corr = F.linear(F.linear(dropped, self.lora_A_q), self.lora_B_q)
+        k_corr = F.linear(F.linear(dropped, self.lora_A_k), self.lora_B_k)
+        v_corr = F.linear(F.linear(dropped, self.lora_A_v), self.lora_B_v)
+
+        lora_out = _interleave_qkv(
+            q_corr,
+            k_corr,
+            v_corr,
+            self.num_q_heads_per_tp,
+            self.num_kv_heads_per_tp,
+            self.head_dim,
+        )
+
+        return base_output + lora_out * self.scaling, bias
+
+
+class LoRAFusedFC1(nn.Module):
+    """LoRA adapter for Megatron's fused gate+up (FC1) ColumnParallelLinear.
+
+    Megatron stores fused gate+up weights as [gate | up] concatenated along dim=0.
+    We use separate gate and up LoRA adapters and concatenate their corrections.
+
+    All lora_B parameters follow ColumnParallelLinear sharding (partition_dim=0).
+    All lora_A parameters are replicated.
+    """
+
+    def __init__(self, base_layer: nn.Module, rank: int, alpha: float, dropout: float = 0.0):
+        super().__init__()
+        self.base_layer = base_layer
+        self.rank = rank
+        self.scaling = alpha / rank
+
+        input_size = base_layer.input_size
+        # Each half is half of the full output
+        half_out = base_layer.output_size_per_partition // 2
+
+        # Gate adapter
+        self.lora_A_gate = nn.Parameter(torch.empty(rank, input_size))
+        self.lora_B_gate = nn.Parameter(torch.zeros(half_out, rank))
+        nn.init.kaiming_uniform_(self.lora_A_gate, a=math.sqrt(5))
+
+        # Up adapter
+        self.lora_A_up = nn.Parameter(torch.empty(rank, input_size))
+        self.lora_B_up = nn.Parameter(torch.zeros(half_out, rank))
+        nn.init.kaiming_uniform_(self.lora_A_up, a=math.sqrt(5))
+
+        self.dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
+
+        # TP attributes: B matrices sharded on dim=0
+        for param in (self.lora_B_gate, self.lora_B_up):
+            param.tensor_model_parallel = True
+            param.partition_dim = 0
+            param.partition_stride = 1
+
+        # A matrices are replicated
+        for param in (self.lora_A_gate, self.lora_A_up):
+            param.tensor_model_parallel = False
+
+    def forward(self, x, **kwargs):
+        base_out = self.base_layer(x, **kwargs)
+        if isinstance(base_out, tuple):
+            base_output, bias = base_out
+        else:
+            base_output, bias = base_out, None
+
+        dropped = self.dropout(x)
+
+        gate_corr = F.linear(F.linear(dropped, self.lora_A_gate), self.lora_B_gate)
+        up_corr = F.linear(F.linear(dropped, self.lora_A_up), self.lora_B_up)
+
+        # Concatenate [gate | up] to match Megatron's fused layout
+        lora_out = torch.cat([gate_corr, up_corr], dim=-1)
+
+        return base_output + lora_out * self.scaling, bias

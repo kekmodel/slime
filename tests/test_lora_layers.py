@@ -113,3 +113,79 @@ def test_lora_scaling():
     out, _ = lora(x)
     expected = torch.tensor([[[2.0, 2.0, 0.0, 0.0]]])
     torch.testing.assert_close(out, expected)
+
+
+def test_lora_fused_qkv_forward_shape():
+    from slime.backends.megatron_utils.lora.layers import LoRAFusedQKV
+
+    qkv_out = 96  # (8 + 2*2) * 8
+    base = MockColumnParallelLinear(input_size=64, output_size_per_partition=qkv_out)
+    lora = LoRAFusedQKV(
+        base,
+        rank=8,
+        alpha=16,
+        num_q_heads_per_tp=8,
+        num_kv_heads_per_tp=2,
+        head_dim=8,
+    )
+    x = torch.randn(2, 10, 64)
+    out, _ = lora(x)
+    assert out.shape == (2, 10, 96)
+
+
+def test_lora_fused_qkv_zero_init():
+    from slime.backends.megatron_utils.lora.layers import LoRAFusedQKV
+
+    base = MockColumnParallelLinear(input_size=64, output_size_per_partition=96)
+    lora = LoRAFusedQKV(
+        base,
+        rank=8,
+        alpha=16,
+        num_q_heads_per_tp=8,
+        num_kv_heads_per_tp=2,
+        head_dim=8,
+    )
+    x = torch.randn(2, 10, 64)
+    base_out, _ = base(x)
+    lora_out, _ = lora(x)
+    torch.testing.assert_close(lora_out, base_out)
+
+
+def test_lora_fused_qkv_kv_heads_equal_one():
+    """[I1] Test with num_kv_heads_per_tp=1 (num_kv_heads < tp_size with replication)."""
+    from slime.backends.megatron_utils.lora.layers import LoRAFusedQKV
+
+    qkv_out = (4 + 2 * 1) * 8  # = 48
+    base = MockColumnParallelLinear(input_size=64, output_size_per_partition=qkv_out)
+    lora = LoRAFusedQKV(
+        base,
+        rank=4,
+        alpha=8,
+        num_q_heads_per_tp=4,
+        num_kv_heads_per_tp=1,
+        head_dim=8,
+    )
+    x = torch.randn(1, 5, 64)
+    out, _ = lora(x)
+    assert out.shape == (1, 5, 48)
+
+
+def test_lora_fused_fc1_forward_shape():
+    from slime.backends.megatron_utils.lora.layers import LoRAFusedFC1
+
+    base = MockColumnParallelLinear(input_size=64, output_size_per_partition=128)
+    lora = LoRAFusedFC1(base, rank=8, alpha=16)
+    x = torch.randn(2, 10, 64)
+    out, _ = lora(x)
+    assert out.shape == (2, 10, 128)
+
+
+def test_lora_fused_fc1_zero_init():
+    from slime.backends.megatron_utils.lora.layers import LoRAFusedFC1
+
+    base = MockColumnParallelLinear(input_size=64, output_size_per_partition=128)
+    lora = LoRAFusedFC1(base, rank=8, alpha=16)
+    x = torch.randn(2, 10, 64)
+    base_out, _ = base(x)
+    lora_out, _ = lora(x)
+    torch.testing.assert_close(lora_out, base_out)
