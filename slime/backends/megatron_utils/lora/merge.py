@@ -98,6 +98,20 @@ def _unmerge_fused_fc1(module: LoRAFusedFC1) -> None:
     module.base_layer.weight.data -= delta
 
 
+def merge_expert_lora(grouped_mlp) -> None:
+    """Merge expert LoRA deltas into GroupedMLP weight1/weight2 permanently."""
+    from slime.backends.megatron_utils.lora.expert_lora import _apply_expert_delta
+
+    _apply_expert_delta(grouped_mlp, merge=True)
+
+
+def unmerge_expert_lora(grouped_mlp) -> None:
+    """Unmerge expert LoRA deltas from GroupedMLP weight1/weight2."""
+    from slime.backends.megatron_utils.lora.expert_lora import _apply_expert_delta
+
+    _apply_expert_delta(grouped_mlp, merge=False)
+
+
 def disable_lora(model: nn.Module) -> None:
     """Set all LoRA scaling to 0 (model behaves as base only). Used for ref forward."""
     for module in model.modules():

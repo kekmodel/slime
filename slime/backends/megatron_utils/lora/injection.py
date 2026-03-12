@@ -36,6 +36,7 @@ def inject_lora_adapters(
     has_o = "o_proj" in targets
     has_fc1 = any(m in targets for m in ("gate_proj", "up_proj"))
     has_fc2 = "down_proj" in targets
+    has_expert = "expert" in targets
 
     count = 0
     for model_chunk in model:
@@ -79,6 +80,20 @@ def inject_lora_adapters(
                     dropout=config.dropout,
                 )
                 count += 1
+
+            # [C1] MoE expert LoRA: inject into GroupedMLP
+            if has_expert and hasattr(layer, "mlp") and hasattr(layer.mlp, "experts"):
+                experts_module = layer.mlp.experts
+                if hasattr(experts_module, "weight1"):  # GroupedMLP
+                    from slime.backends.megatron_utils.lora.expert_lora import inject_expert_lora
+
+                    inject_expert_lora(
+                        experts_module,
+                        rank=config.rank,
+                        alpha=config.alpha,
+                        dropout=config.dropout,
+                    )
+                    count += 2  # FC1 + FC2
 
     logger.info(f"Injected {count} LoRA adapters (rank={config.rank}, alpha={config.alpha})")
 
