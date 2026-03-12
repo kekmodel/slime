@@ -11,6 +11,7 @@ Key design:
 - Merge: add delta directly to weight1/weight2 (the flat stored tensors)
 - Performance: bmm cost is negligible (~0.1% of gmm) for small rank
 """
+
 from __future__ import annotations
 
 import math

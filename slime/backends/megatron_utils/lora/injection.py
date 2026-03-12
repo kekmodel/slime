@@ -1,4 +1,5 @@
 """LoRA adapter injection into Megatron GPTModel."""
+
 from __future__ import annotations
 
 import logging

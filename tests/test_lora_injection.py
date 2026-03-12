@@ -1,7 +1,6 @@
 """Tests for LoRA injection into model."""
-import argparse
 
-import torch
+
 import torch.nn as nn
 
 
@@ -50,12 +49,16 @@ def test_inject_lora_replaces_layers():
 
     model = _make_mock_model()
     config = LoRAConfig(
-        rank=8, alpha=16,
+        rank=8,
+        alpha=16,
         target_modules=("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"),
     )
     inject_lora_adapters(
-        [model], config,  # [I6] Accepts list of model chunks
-        num_q_heads_per_tp=8, num_kv_heads_per_tp=2, head_dim=8,
+        [model],
+        config,  # [I6] Accepts list of model chunks
+        num_q_heads_per_tp=8,
+        num_kv_heads_per_tp=2,
+        head_dim=8,
     )
 
     layer = model.decoder.layers[0]
@@ -76,8 +79,11 @@ def test_inject_lora_vp_multiple_chunks():
     config = LoRAConfig(rank=8, alpha=16, target_modules=("q_proj", "k_proj", "v_proj"))
 
     inject_lora_adapters(
-        [chunk0, chunk1], config,
-        num_q_heads_per_tp=8, num_kv_heads_per_tp=2, head_dim=8,
+        [chunk0, chunk1],
+        config,
+        num_q_heads_per_tp=8,
+        num_kv_heads_per_tp=2,
+        head_dim=8,
     )
 
     # Both chunks should have LoRA injected

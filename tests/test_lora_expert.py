@@ -1,8 +1,7 @@
 """Tests for MoE expert LoRA with GroupedMLP forward override."""
+
 import torch
 import torch.nn as nn
-
-import pytest
 
 
 class MockGroupedMLP(nn.Module):
@@ -22,9 +21,8 @@ class MockGroupedMLP(nn.Module):
         self._forward_called = True
         E = self.num_local_experts
         H = self.config.hidden_size
-        F = self.config.ffn_hidden_size
         w1 = self.weight1.view(E, H, -1)  # [E, H, 2F]
-        w2 = self.weight2.view(E, -1, H)  # [E, F, H]
+        _ = self.weight2.view(E, -1, H)  # [E, F, H] (used in real GroupedMLP)
         output = torch.bmm(permuted_local_hidden_states.unsqueeze(0).expand(E, -1, -1), w1)
         return output.sum(0)
 
