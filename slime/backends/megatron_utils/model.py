@@ -700,6 +700,11 @@ def save(
         opt_param_scheduler (OptimizerParamScheduler): LR/WD scheduler.
     """
     args = get_args()
+    # [I4] Adapter-only save when LoRA is enabled
+    if getattr(args, "lora_rank", 0) > 0 and getattr(args, "save_adapter_only", False):
+        _save_lora_adapter(iteration, model, args)
+        return
+
     if should_disable_forward_pre_hook(args):
         disable_forward_pre_hook(model)
     save_checkpoint(
@@ -714,6 +719,53 @@ def save(
     )
     if should_disable_forward_pre_hook(args):
         enable_forward_pre_hook(model)
+
+
+def _save_lora_adapter(iteration: int, model: Sequence[DDP], args) -> None:
+    """[I5] Save LoRA adapter weights with proper TP all-gather.
+
+    All TP ranks participate in all_gather (collective op), but only the main rank writes to disk.
+    This produces a complete (un-sharded) adapter checkpoint that can be loaded with any TP configuration.
+    """
+    import json
+    from pathlib import Path
+
+    from slime.backends.megatron_utils.update_weight.common import all_gather_param
+
+    save_dir = Path(args.save) / f"lora_adapter_iter_{iteration:07d}"
+
+    # [I5] All TP ranks must participate in all_gather (it's a collective op).
+    # Gather LoRA params to full tensors across TP.
+    adapter_state = {}
+    for model_chunk in model:
+        unwrapped = model_chunk.module if hasattr(model_chunk, "module") else model_chunk
+        for name, param in unwrapped.named_parameters():
+            if "lora_" in name:
+                full_param = all_gather_param(name, param)
+                adapter_state[name] = full_param.cpu()
+
+    # Only main rank writes to disk
+    if mpu.get_data_parallel_rank() == 0 and mpu.get_tensor_model_parallel_rank() == 0:
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        torch.save(adapter_state, save_dir / "adapter_model.bin")
+
+        from slime.backends.megatron_utils.lora.config import LoRAConfig
+
+        config = LoRAConfig.from_args(args)
+        config_dict = {
+            "peft_type": "LORA",
+            "r": config.rank,
+            "lora_alpha": config.alpha,
+            "target_modules": list(config.target_modules),
+        }
+        (save_dir / "lora_config.json").write_text(json.dumps(config_dict, indent=2))
+
+        logger.info(f"Saved LoRA adapter to {save_dir}")
+
+    # Barrier to ensure save completes before any rank proceeds
+    if torch.distributed.is_initialized():
+        torch.distributed.barrier()
 
 
 def initialize_model_and_optimizer(

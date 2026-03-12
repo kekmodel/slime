@@ -94,6 +94,11 @@ class MegatronTrainRayActor(TrainRayActor):
         self._lora_enabled = getattr(args, "lora_rank", 0) > 0
         self._needs_ref_logprobs = args.kl_coef != 0 or getattr(args, "use_kl_loss", False)
 
+        if getattr(args, "adapter_load", None):
+            from slime.backends.megatron_utils.checkpoint import load_lora_adapter
+
+            load_lora_adapter(self.model, args.adapter_load)
+
         if role == "critic":
             if self.args.offload_train:
                 self.sleep()

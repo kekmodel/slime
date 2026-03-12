@@ -74,3 +74,38 @@ def _load_checkpoint_hf(ddp_model, optimizer, args, load_path: str):
 def _is_dir_nonempty(path):
     with os.scandir(path) as it:
         return any(it)
+
+
+def load_lora_adapter(model, adapter_path: str) -> None:
+    """Load LoRA adapter weights on top of already-injected model.
+
+    The adapter checkpoint contains un-sharded (full) tensors.
+    Each TP rank extracts its shard based on the TP attributes set during injection.
+    """
+    import torch
+    from megatron.core import parallel_state as mpu
+
+    adapter_file = Path(adapter_path) / "adapter_model.bin"
+    adapter_state = torch.load(adapter_file, map_location="cpu", weights_only=True)
+
+    tp_rank = mpu.get_tensor_model_parallel_rank()
+    tp_size = mpu.get_tensor_model_parallel_world_size()
+
+    loaded = 0
+    for model_chunk in model:
+        unwrapped = model_chunk.module if hasattr(model_chunk, "module") else model_chunk
+        for name, param in unwrapped.named_parameters():
+            if name not in adapter_state:
+                continue
+            full_tensor = adapter_state[name]
+
+            # Shard if needed based on TP attributes
+            if getattr(param, "tensor_model_parallel", False) and tp_size > 1:
+                dim = param.partition_dim
+                chunk_size = full_tensor.shape[dim] // tp_size
+                full_tensor = full_tensor.narrow(dim, tp_rank * chunk_size, chunk_size)
+
+            param.data.copy_(full_tensor.to(param.device))
+            loaded += 1
+
+    logger.info(f"Loaded {loaded} LoRA adapter params from {adapter_path}")
