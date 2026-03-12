@@ -8,6 +8,7 @@ import yaml
 from sglang_router.launch_router import RouterArgs
 from transformers import AutoConfig
 
+from slime.backends.megatron_utils.lora.config import DEFAULT_TARGET_MODULES, add_lora_args
 from slime.backends.sglang_utils.arguments import add_sglang_arguments
 from slime.backends.sglang_utils.arguments import validate_args as sglang_validate_args
 from slime.utils.eval_config import EvalDatasetConfig, build_eval_dataset_configs, ensure_dataset_list
@@ -1327,6 +1328,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
         parser = add_prefill_decode_disaggregation_arguments(parser)
         parser = add_ci_arguments(parser)
         parser = add_custom_megatron_plugins_arguments(parser)
+        add_lora_args(parser)
         reset_arg(
             parser,
             "--custom-config-path",
@@ -1658,6 +1660,27 @@ def slime_validate_args(args):
     assert not (
         args.prefill_num_servers is not None and args.rollout_external
     ), "prefill_num_servers cannot be set when rollout_external is set."
+
+    # LoRA post-processing
+    lora_rank = getattr(args, "lora_rank", 0)
+    if lora_rank > 0:
+        # Auto-set default target modules if not specified (I4)
+        if getattr(args, "lora_target_modules", None) is None:
+            args.lora_target_modules = DEFAULT_TARGET_MODULES
+            logger.info(f"--lora-target-modules not set; defaulting to {DEFAULT_TARGET_MODULES}")
+
+        # Auto-set save_adapter_only when LoRA is enabled (I4)
+        if getattr(args, "save_adapter_only", None) is None:
+            args.save_adapter_only = True
+            logger.info("LoRA enabled: defaulting --save-adapter-only to True. Use --no-save-adapter-only to override.")
+
+        # Auto-disable ref_update_interval with warning when LoRA is enabled (I3)
+        if getattr(args, "ref_update_interval", None) is not None:
+            logger.warning(
+                "--ref-update-interval is incompatible with LoRA and will be disabled. "
+                "The reference model cannot be updated from a LoRA-adapted actor."
+            )
+            args.ref_update_interval = None
 
 
 def hf_validate_args(args, hf_config):
