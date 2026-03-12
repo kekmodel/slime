@@ -106,6 +106,34 @@ def setup_model_and_optimizer(
 
     model = get_model(get_model_provider_func(args, role), ModelType.encoder_or_decoder)
 
+    if getattr(args, "lora_rank", 0) > 0:
+        from slime.backends.megatron_utils.lora import LoRAConfig, freeze_base_params, inject_lora_adapters
+
+        lora_config = LoRAConfig.from_args(args)
+
+        # [I1] Derive head counts from the actual model to handle num_kv_heads < tp_size.
+        # Megatron replicates KV heads when num_kv_heads < tp_size, so the actual
+        # per-TP output dimension is set correctly in the base layer.
+        head_dim = args.kv_channels if args.kv_channels else (args.hidden_size // args.num_attention_heads)
+        first_layer = None
+        for model_chunk in model:
+            unwrapped = model_chunk.module if hasattr(model_chunk, "module") else model_chunk
+            if hasattr(unwrapped, "decoder") and len(unwrapped.decoder.layers) > 0:
+                first_layer = unwrapped.decoder.layers[0]
+                break
+        assert first_layer is not None, "No decoder layers found in model"
+
+        qkv_out_per_tp = first_layer.self_attention.linear_qkv.output_size_per_partition
+        # qkv_out_per_tp = (num_q_heads_per_tp + 2 * num_kv_heads_per_tp) * head_dim
+        tp_size = mpu.get_tensor_model_parallel_world_size()
+        num_q_heads_per_tp = args.num_attention_heads // tp_size
+        # Solve for num_kv_heads_per_tp from qkv_out:
+        # qkv_out = q_per_tp * head_dim + 2 * kv_per_tp * head_dim
+        num_kv_heads_per_tp = (qkv_out_per_tp - num_q_heads_per_tp * head_dim) // (2 * head_dim)
+
+        inject_lora_adapters(model, lora_config, num_q_heads_per_tp, num_kv_heads_per_tp, head_dim)
+        freeze_base_params(model)
+
     # Optimizer
     kwargs = {}
     for f in dataclasses.fields(OptimizerConfig):
