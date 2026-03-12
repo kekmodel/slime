@@ -1,4 +1,5 @@
 """TP-compatible LoRA wrapper layers for Megatron parallel linears."""
+
 from __future__ import annotations
 
 import math
@@ -201,30 +202,30 @@ class LoRAFusedQKV(nn.Module):
         kv_out = num_kv_heads_per_tp * head_dim
 
         # Q adapter
-        self.lora_A_q = nn.Parameter(torch.empty(rank, input_size))
-        self.lora_B_q = nn.Parameter(torch.zeros(q_out, rank))
-        nn.init.kaiming_uniform_(self.lora_A_q, a=math.sqrt(5))
+        self.q_lora_A = nn.Parameter(torch.empty(rank, input_size))
+        self.q_lora_B = nn.Parameter(torch.zeros(q_out, rank))
+        nn.init.kaiming_uniform_(self.q_lora_A, a=math.sqrt(5))
 
         # K adapter
-        self.lora_A_k = nn.Parameter(torch.empty(rank, input_size))
-        self.lora_B_k = nn.Parameter(torch.zeros(kv_out, rank))
-        nn.init.kaiming_uniform_(self.lora_A_k, a=math.sqrt(5))
+        self.k_lora_A = nn.Parameter(torch.empty(rank, input_size))
+        self.k_lora_B = nn.Parameter(torch.zeros(kv_out, rank))
+        nn.init.kaiming_uniform_(self.k_lora_A, a=math.sqrt(5))
 
         # V adapter
-        self.lora_A_v = nn.Parameter(torch.empty(rank, input_size))
-        self.lora_B_v = nn.Parameter(torch.zeros(kv_out, rank))
-        nn.init.kaiming_uniform_(self.lora_A_v, a=math.sqrt(5))
+        self.v_lora_A = nn.Parameter(torch.empty(rank, input_size))
+        self.v_lora_B = nn.Parameter(torch.zeros(kv_out, rank))
+        nn.init.kaiming_uniform_(self.v_lora_A, a=math.sqrt(5))
 
         self.dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
 
         # TP attributes: all B matrices sharded on dim=0 (column parallel)
-        for param in (self.lora_B_q, self.lora_B_k, self.lora_B_v):
+        for param in (self.q_lora_B, self.k_lora_B, self.v_lora_B):
             param.tensor_model_parallel = True
             param.partition_dim = 0
             param.partition_stride = 1
 
         # A matrices are replicated
-        for param in (self.lora_A_q, self.lora_A_k, self.lora_A_v):
+        for param in (self.q_lora_A, self.k_lora_A, self.v_lora_A):
             param.tensor_model_parallel = False
 
     def forward(self, x, **kwargs):
@@ -236,9 +237,9 @@ class LoRAFusedQKV(nn.Module):
 
         dropped = self.dropout(x)
 
-        q_corr = F.linear(F.linear(dropped, self.lora_A_q), self.lora_B_q)
-        k_corr = F.linear(F.linear(dropped, self.lora_A_k), self.lora_B_k)
-        v_corr = F.linear(F.linear(dropped, self.lora_A_v), self.lora_B_v)
+        q_corr = F.linear(F.linear(dropped, self.q_lora_A), self.q_lora_B)
+        k_corr = F.linear(F.linear(dropped, self.k_lora_A), self.k_lora_B)
+        v_corr = F.linear(F.linear(dropped, self.v_lora_A), self.v_lora_B)
 
         lora_out = _interleave_qkv(
             q_corr,
@@ -273,25 +274,25 @@ class LoRAFusedFC1(nn.Module):
         half_out = base_layer.output_size_per_partition // 2
 
         # Gate adapter
-        self.lora_A_gate = nn.Parameter(torch.empty(rank, input_size))
-        self.lora_B_gate = nn.Parameter(torch.zeros(half_out, rank))
-        nn.init.kaiming_uniform_(self.lora_A_gate, a=math.sqrt(5))
+        self.gate_lora_A = nn.Parameter(torch.empty(rank, input_size))
+        self.gate_lora_B = nn.Parameter(torch.zeros(half_out, rank))
+        nn.init.kaiming_uniform_(self.gate_lora_A, a=math.sqrt(5))
 
         # Up adapter
-        self.lora_A_up = nn.Parameter(torch.empty(rank, input_size))
-        self.lora_B_up = nn.Parameter(torch.zeros(half_out, rank))
-        nn.init.kaiming_uniform_(self.lora_A_up, a=math.sqrt(5))
+        self.up_lora_A = nn.Parameter(torch.empty(rank, input_size))
+        self.up_lora_B = nn.Parameter(torch.zeros(half_out, rank))
+        nn.init.kaiming_uniform_(self.up_lora_A, a=math.sqrt(5))
 
         self.dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
 
         # TP attributes: B matrices sharded on dim=0
-        for param in (self.lora_B_gate, self.lora_B_up):
+        for param in (self.gate_lora_B, self.up_lora_B):
             param.tensor_model_parallel = True
             param.partition_dim = 0
             param.partition_stride = 1
 
         # A matrices are replicated
-        for param in (self.lora_A_gate, self.lora_A_up):
+        for param in (self.gate_lora_A, self.up_lora_A):
             param.tensor_model_parallel = False
 
     def forward(self, x, **kwargs):
@@ -303,8 +304,8 @@ class LoRAFusedFC1(nn.Module):
 
         dropped = self.dropout(x)
 
-        gate_corr = F.linear(F.linear(dropped, self.lora_A_gate), self.lora_B_gate)
-        up_corr = F.linear(F.linear(dropped, self.lora_A_up), self.lora_B_up)
+        gate_corr = F.linear(F.linear(dropped, self.gate_lora_A), self.gate_lora_B)
+        up_corr = F.linear(F.linear(dropped, self.up_lora_A), self.up_lora_B)
 
         # Concatenate [gate | up] to match Megatron's fused layout
         lora_out = torch.cat([gate_corr, up_corr], dim=-1)
