@@ -80,6 +80,52 @@ def get_optimizer_param_scheduler(args: Namespace, optimizer: MegatronOptimizer)
     return opt_param_scheduler
 
 
+def _wrap_model_with_ddp(model: list, args) -> list:
+    """Wrap model chunks in Megatron DDP.
+
+    Replicates the DDP wrapping from Megatron's get_model() so that LoRA params
+    injected after model creation are included in DDP's gradient sync.
+    """
+    from megatron.core.distributed import DistributedDataParallelConfig
+
+    config = get_model_config(model[0])
+
+    # Build DDP config from args (mirrors Megatron's get_model logic)
+    kwargs = {}
+    for f in dataclasses.fields(DistributedDataParallelConfig):
+        if hasattr(args, f.name):
+            kwargs[f.name] = getattr(args, f.name)
+    kwargs["grad_reduce_in_fp32"] = getattr(args, "accumulate_allreduce_grads_in_fp32", False)
+    kwargs["check_for_nan_in_grad"] = getattr(args, "check_for_nan_in_loss_and_grad", False)
+    kwargs["check_for_large_grads"] = getattr(args, "check_for_large_grads", False)
+    if getattr(args, "ddp_num_buckets", None) is not None:
+        num_parameters = sum(p.numel() for p in model[0].parameters())
+        kwargs["bucket_size"] = num_parameters // args.ddp_num_buckets
+    else:
+        kwargs["bucket_size"] = getattr(args, "ddp_bucket_size", None)
+    kwargs["pad_buckets_for_high_nccl_busbw"] = getattr(args, "ddp_pad_buckets_for_high_nccl_busbw", False)
+    kwargs["reduce_scatter_with_fp32_accumulation"] = getattr(args, "ddp_reduce_scatter_with_fp32_accumulation", False)
+    kwargs["average_in_collective"] = getattr(args, "ddp_average_in_collective", False)
+    ddp_config = DistributedDataParallelConfig(**kwargs)
+
+    # Smart defaults for bucket size
+    if ddp_config.bucket_size is None:
+        ddp_config.bucket_size = max(40_000_000, 1_000_000 * mpu.get_data_parallel_world_size())
+    if not ddp_config.overlap_grad_reduce:
+        ddp_config.bucket_size = None
+
+    model = [
+        DDP(
+            config=config,
+            ddp_config=ddp_config,
+            module=model_chunk,
+            disable_bucketing=(i > 0) or getattr(args, "overlap_param_gather_with_optimizer_step", False),
+        )
+        for i, model_chunk in enumerate(model)
+    ]
+    return model
+
+
 def setup_model_and_optimizer(
     args: Namespace,
     role: str = "actor",
@@ -104,9 +150,15 @@ def setup_model_and_optimizer(
     assert not args.moe_use_upcycling
     assert args.load is not None or args.pretrained_checkpoint is not None
 
-    model = get_model(get_model_provider_func(args, role), ModelType.encoder_or_decoder)
+    lora_enabled = getattr(args, "lora_rank", 0) > 0
 
-    if getattr(args, "lora_rank", 0) > 0:
+    model = get_model(
+        get_model_provider_func(args, role),
+        ModelType.encoder_or_decoder,
+        wrap_with_ddp=not lora_enabled,  # Skip DDP when LoRA — inject first, then wrap
+    )
+
+    if lora_enabled:
         from slime.backends.megatron_utils.lora import LoRAConfig, freeze_base_params, inject_lora_adapters
 
         lora_config = LoRAConfig.from_args(args)
@@ -133,6 +185,10 @@ def setup_model_and_optimizer(
 
         inject_lora_adapters(model, lora_config, num_q_heads_per_tp, num_kv_heads_per_tp, head_dim)
         freeze_base_params(model)
+
+        # Wrap in DDP AFTER LoRA injection so LoRA params are included in gradient sync.
+        # This replicates Megatron's get_model() DDP wrapping logic.
+        model = _wrap_model_with_ddp(model, args)
 
     # Optimizer
     kwargs = {}

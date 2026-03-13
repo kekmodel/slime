@@ -26,8 +26,10 @@ class LoRAColumnParallelLinear(nn.Module):
         input_size = base_layer.input_size
         output_size = base_layer.output_size_per_partition
 
-        self.lora_A = nn.Parameter(torch.empty(rank, input_size))
-        self.lora_B = nn.Parameter(torch.zeros(output_size, rank))
+        device = base_layer.weight.device
+        dtype = base_layer.weight.dtype
+        self.lora_A = nn.Parameter(torch.empty(rank, input_size, device=device, dtype=dtype))
+        self.lora_B = nn.Parameter(torch.zeros(output_size, rank, device=device, dtype=dtype))
         nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
 
         self.dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
@@ -45,6 +47,10 @@ class LoRAColumnParallelLinear(nn.Module):
             base_output, bias = base_out
         else:
             base_output, bias = base_out, None
+
+        # Early return when LoRA is disabled (scaling=0)
+        if self.scaling == 0.0:
+            return base_output, bias
 
         lora_out = F.linear(F.linear(self.dropout(x), self.lora_A), self.lora_B) * self.scaling
         return base_output + lora_out, bias
@@ -67,8 +73,10 @@ class LoRARowParallelLinear(nn.Module):
         input_size = base_layer.input_size_per_partition
         output_size = base_layer.output_size
 
-        self.lora_A = nn.Parameter(torch.empty(rank, input_size))
-        self.lora_B = nn.Parameter(torch.zeros(output_size, rank))
+        device = base_layer.weight.device
+        dtype = base_layer.weight.dtype
+        self.lora_A = nn.Parameter(torch.empty(rank, input_size, device=device, dtype=dtype))
+        self.lora_B = nn.Parameter(torch.zeros(output_size, rank, device=device, dtype=dtype))
         nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
 
         self.dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
@@ -85,7 +93,24 @@ class LoRARowParallelLinear(nn.Module):
         else:
             base_output, bias = base_out, None
 
+        # Early return when LoRA is disabled (scaling=0)
+        if self.scaling == 0.0:
+            return base_output, bias
+
         lora_out = F.linear(F.linear(self.dropout(x), self.lora_A), self.lora_B) * self.scaling
+
+        # All-reduce lora_out across TP ranks to match base_output's already-reduced state.
+        # RowParallelLinear reduces its output internally; LoRA output needs the same treatment.
+        if hasattr(self.base_layer, "tp_group") and self.base_layer.tp_group is not None:
+            if getattr(self.base_layer, "sequence_parallel", False):
+                from megatron.core.tensor_parallel.mappings import reduce_scatter_to_sequence_parallel_region
+
+                lora_out = reduce_scatter_to_sequence_parallel_region(lora_out, group=self.base_layer.tp_group)
+            elif not getattr(self.base_layer, "explicit_expert_comm", False):
+                from megatron.core.tensor_parallel.mappings import reduce_from_tensor_model_parallel_region
+
+                lora_out = reduce_from_tensor_model_parallel_region(lora_out, group=self.base_layer.tp_group)
+
         return base_output + lora_out, bias
 
 
@@ -201,19 +226,22 @@ class LoRAFusedQKV(nn.Module):
         q_out = num_q_heads_per_tp * head_dim
         kv_out = num_kv_heads_per_tp * head_dim
 
+        device = base_layer.weight.device
+        dtype = base_layer.weight.dtype
+
         # Q adapter
-        self.q_lora_A = nn.Parameter(torch.empty(rank, input_size))
-        self.q_lora_B = nn.Parameter(torch.zeros(q_out, rank))
+        self.q_lora_A = nn.Parameter(torch.empty(rank, input_size, device=device, dtype=dtype))
+        self.q_lora_B = nn.Parameter(torch.zeros(q_out, rank, device=device, dtype=dtype))
         nn.init.kaiming_uniform_(self.q_lora_A, a=math.sqrt(5))
 
         # K adapter
-        self.k_lora_A = nn.Parameter(torch.empty(rank, input_size))
-        self.k_lora_B = nn.Parameter(torch.zeros(kv_out, rank))
+        self.k_lora_A = nn.Parameter(torch.empty(rank, input_size, device=device, dtype=dtype))
+        self.k_lora_B = nn.Parameter(torch.zeros(kv_out, rank, device=device, dtype=dtype))
         nn.init.kaiming_uniform_(self.k_lora_A, a=math.sqrt(5))
 
         # V adapter
-        self.v_lora_A = nn.Parameter(torch.empty(rank, input_size))
-        self.v_lora_B = nn.Parameter(torch.zeros(kv_out, rank))
+        self.v_lora_A = nn.Parameter(torch.empty(rank, input_size, device=device, dtype=dtype))
+        self.v_lora_B = nn.Parameter(torch.zeros(kv_out, rank, device=device, dtype=dtype))
         nn.init.kaiming_uniform_(self.v_lora_A, a=math.sqrt(5))
 
         self.dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
@@ -234,6 +262,10 @@ class LoRAFusedQKV(nn.Module):
             base_output, bias = base_out
         else:
             base_output, bias = base_out, None
+
+        # Early return when LoRA is disabled (scaling=0)
+        if self.scaling == 0.0:
+            return base_output, bias
 
         dropped = self.dropout(x)
 
@@ -273,14 +305,17 @@ class LoRAFusedFC1(nn.Module):
         # Each half is half of the full output
         half_out = base_layer.output_size_per_partition // 2
 
+        device = base_layer.weight.device
+        dtype = base_layer.weight.dtype
+
         # Gate adapter
-        self.gate_lora_A = nn.Parameter(torch.empty(rank, input_size))
-        self.gate_lora_B = nn.Parameter(torch.zeros(half_out, rank))
+        self.gate_lora_A = nn.Parameter(torch.empty(rank, input_size, device=device, dtype=dtype))
+        self.gate_lora_B = nn.Parameter(torch.zeros(half_out, rank, device=device, dtype=dtype))
         nn.init.kaiming_uniform_(self.gate_lora_A, a=math.sqrt(5))
 
         # Up adapter
-        self.up_lora_A = nn.Parameter(torch.empty(rank, input_size))
-        self.up_lora_B = nn.Parameter(torch.zeros(half_out, rank))
+        self.up_lora_A = nn.Parameter(torch.empty(rank, input_size, device=device, dtype=dtype))
+        self.up_lora_B = nn.Parameter(torch.zeros(half_out, rank, device=device, dtype=dtype))
         nn.init.kaiming_uniform_(self.up_lora_A, a=math.sqrt(5))
 
         self.dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
@@ -301,6 +336,10 @@ class LoRAFusedFC1(nn.Module):
             base_output, bias = base_out
         else:
             base_output, bias = base_out, None
+
+        # Early return when LoRA is disabled (scaling=0)
+        if self.scaling == 0.0:
+            return base_output, bias
 
         dropped = self.dropout(x)
 

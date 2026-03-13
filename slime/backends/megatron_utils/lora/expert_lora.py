@@ -10,6 +10,9 @@ Key design:
 - Forward patch: compute delta via bmm, add to reshaped w1/w2, then call gmm as normal
 - Merge: add delta directly to weight1/weight2 (the flat stored tensors)
 - Performance: bmm cost is negligible (~0.1% of gmm) for small rank
+- F (ffn dim per expert) is derived from actual weight shape, NOT config.ffn_hidden_size,
+  because Megatron uses config.moe_ffn_hidden_size and ETP further partitions it.
+  Formula: F = weight1.shape[1] // (2 * E)
 """
 
 from __future__ import annotations
@@ -37,21 +40,26 @@ def inject_expert_lora(
     """
     E = grouped_mlp.num_local_experts
     H = grouped_mlp.config.hidden_size
-    F = grouped_mlp.config.ffn_hidden_size
+    # Derive F from actual weight shape to handle both moe_ffn_hidden_size and ETP partitioning.
+    # weight1 shape is [H, E*2*F_partition], so F_partition = shape[1] // (2 * E).
+    F = grouped_mlp.weight1.shape[1] // (2 * E)
 
     scale = alpha / rank
+
+    device = grouped_mlp.weight1.device
+    dtype = grouped_mlp.weight1.dtype
 
     # FC1 LoRA: weight1 is [H, E*2F] -> reshaped [E, H, 2F] -> split into gate [E,H,F] and up [E,H,F]
     # LoRA delta for gate: gate_B @ A -> [E, F, rank] @ [E, rank, H] = [E, F, H]
     # LoRA delta for up:   up_B  @ A -> [E, F, H]
-    grouped_mlp._lora_A_fc1 = nn.Parameter(torch.empty(E, rank, H))
-    grouped_mlp._lora_gate_B_fc1 = nn.Parameter(torch.zeros(E, F, rank))
-    grouped_mlp._lora_up_B_fc1 = nn.Parameter(torch.zeros(E, F, rank))
+    grouped_mlp._lora_A_fc1 = nn.Parameter(torch.empty(E, rank, H, device=device, dtype=dtype))
+    grouped_mlp._lora_gate_B_fc1 = nn.Parameter(torch.zeros(E, F, rank, device=device, dtype=dtype))
+    grouped_mlp._lora_up_B_fc1 = nn.Parameter(torch.zeros(E, F, rank, device=device, dtype=dtype))
 
     # FC2 LoRA: weight2 is [E*F, H] -> reshaped [E, F, H]
     # LoRA delta: B @ A -> [E, H, rank] @ [E, rank, F] = [E, H, F]
-    grouped_mlp._lora_A_fc2 = nn.Parameter(torch.empty(E, rank, F))
-    grouped_mlp._lora_B_fc2 = nn.Parameter(torch.zeros(E, H, rank))
+    grouped_mlp._lora_A_fc2 = nn.Parameter(torch.empty(E, rank, F, device=device, dtype=dtype))
+    grouped_mlp._lora_B_fc2 = nn.Parameter(torch.zeros(E, H, rank, device=device, dtype=dtype))
 
     # Initialize A matrices
     for e in range(E):
@@ -80,19 +88,23 @@ def inject_expert_lora(
     grouped_mlp.forward = types.MethodType(_lora_grouped_mlp_forward, grouped_mlp)
 
 
-def _lora_grouped_mlp_forward(self, permuted_local_hidden_states, tokens_per_expert):
+def _lora_grouped_mlp_forward(self, permuted_local_hidden_states, tokens_per_expert, permuted_probs):
     """Patched forward for GroupedMLP with LoRA delta injection.
+
+    Matches the real GroupedMLP.forward signature:
+        forward(self, permuted_local_hidden_states, tokens_per_expert, permuted_probs)
 
     Computes LoRA deltas with gradient tracking and adds to cloned weights so that
     autograd can backpropagate through the LoRA parameters. Base weights (frozen) are
     detached to avoid unnecessary gradient computation.
     """
     if not self._lora_enabled or self._lora_scale == 0.0:
-        return self._original_forward(permuted_local_hidden_states, tokens_per_expert)
+        return self._original_forward(permuted_local_hidden_states, tokens_per_expert, permuted_probs)
 
     E = self.num_local_experts
     H = self.config.hidden_size
-    F = self.config.ffn_hidden_size
+    # Derive F from actual weight shape to handle both moe_ffn_hidden_size and ETP partitioning.
+    F = self.weight1.shape[1] // (2 * E)
     scale = self._lora_scale
 
     # Compute LoRA deltas WITH gradient tracking (no torch.no_grad!)
@@ -120,7 +132,7 @@ def _lora_grouped_mlp_forward(self, permuted_local_hidden_states, tokens_per_exp
     self._parameters["weight1"] = w1_modified
     self._parameters["weight2"] = w2_modified
     try:
-        output = self._original_forward(permuted_local_hidden_states, tokens_per_expert)
+        output = self._original_forward(permuted_local_hidden_states, tokens_per_expert, permuted_probs)
     finally:
         self._parameters["weight1"] = orig_w1
         self._parameters["weight2"] = orig_w2
@@ -139,7 +151,8 @@ def _apply_expert_delta(grouped_mlp, merge: bool) -> None:
 
     E = grouped_mlp.num_local_experts
     H = grouped_mlp.config.hidden_size
-    F = grouped_mlp.config.ffn_hidden_size
+    # Derive F from actual weight shape to handle both moe_ffn_hidden_size and ETP partitioning.
+    F = grouped_mlp.weight1.shape[1] // (2 * E)
 
     with torch.no_grad():
         # FC1: weight1 is [H, E*2F]

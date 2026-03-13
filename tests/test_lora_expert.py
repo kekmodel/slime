@@ -17,7 +17,7 @@ class MockGroupedMLP(nn.Module):
         self.config = type("Config", (), {"hidden_size": hidden_size, "ffn_hidden_size": ffn_hidden})()
         self._forward_called = False
 
-    def forward(self, permuted_local_hidden_states, tokens_per_expert):
+    def forward(self, permuted_local_hidden_states, tokens_per_expert, permuted_probs=None):
         self._forward_called = True
         E = self.num_local_experts
         H = self.config.hidden_size
@@ -112,7 +112,8 @@ def test_expert_lora_gradient_flow():
 
     x = torch.randn(4, 16, requires_grad=False)
     tokens_per_expert = torch.tensor([2, 2])
-    output = mlp(x, tokens_per_expert)
+    permuted_probs = torch.ones(4)
+    output = mlp(x, tokens_per_expert, permuted_probs)
     loss = output.sum()
     loss.backward()
 

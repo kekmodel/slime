@@ -393,17 +393,19 @@ class MegatronTrainRayActor(TrainRayActor):
 
                     for model_chunk in self.model:
                         disable_lora(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
-                    if self.args.use_routing_replay:
-                        os.environ["ROUTING_REPLAY_STAGE"] = "fallthrough"
-                    rollout_data.update(
-                        self.compute_log_prob(
-                            data_iterator,
-                            num_microbatches,
-                            store_prefix="ref_",
+                    try:
+                        if self.args.use_routing_replay:
+                            os.environ["ROUTING_REPLAY_STAGE"] = "fallthrough"
+                        rollout_data.update(
+                            self.compute_log_prob(
+                                data_iterator,
+                                num_microbatches,
+                                store_prefix="ref_",
+                            )
                         )
-                    )
-                    for model_chunk in self.model:
-                        enable_lora(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
+                    finally:
+                        for model_chunk in self.model:
+                            enable_lora(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
                     # LoRA path: model was never swapped, no _switch_model needed
                 elif "ref" in self.weights_backuper.backup_tags:
                     if self.args.use_routing_replay:
@@ -538,18 +540,19 @@ class MegatronTrainRayActor(TrainRayActor):
                 if self.args.colocate and self.args.enable_weights_backuper:
                     self.weights_backuper.backup("actor")
 
-            print_memory("before update_weights")
-            self.weight_updater.update_weights()
-            print_memory("after update_weights")
+            try:
+                print_memory("before update_weights")
+                self.weight_updater.update_weights()
+                print_memory("after update_weights")
+            finally:
+                if self._lora_enabled:
+                    # Unmerge to restore base weights for continued training
+                    for model_chunk in self.model:
+                        unmerge_lora_weights(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
 
-            if self._lora_enabled:
-                # Unmerge to restore base weights for continued training
-                for model_chunk in self.model:
-                    unmerge_lora_weights(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
-
-                # [C2] Colocate path: Restore CPU backup to unmerged state
-                if self.args.colocate and self.args.enable_weights_backuper:
-                    self.weights_backuper.backup("actor")
+                    # [C2] Colocate path: Restore CPU backup to unmerged state
+                    if self.args.colocate and self.args.enable_weights_backuper:
+                        self.weights_backuper.backup("actor")
 
             if self.args.ci_test and len(rollout_engines) > 0:
                 engine = random.choice(rollout_engines)

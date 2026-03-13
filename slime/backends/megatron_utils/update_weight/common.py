@@ -12,6 +12,12 @@ from slime.backends.megatron_utils.misc_utils import strip_param_name_prefix
 from slime.utils.types import ParamInfo
 
 
+def _is_lora_param(name: str) -> bool:
+    """Check if a parameter name belongs to a LoRA adapter (not a base weight)."""
+    leaf = name.rsplit(".", 1)[-1] if "." in name else name
+    return "lora_" in leaf or leaf.startswith("_lora_")
+
+
 def all_gather_param(name: str, param: torch.nn.Parameter) -> torch.Tensor:
     """
     All-gather TP-sharded param to full tensor. expert_bias→param, non-TP/duplicated→param.data.
@@ -146,6 +152,12 @@ def _named_params_and_buffers_vanilla(model: Sequence[torch.nn.Module]) -> Itera
             return f"vp_stages.{vp_stage}.{strip_param_name_prefix(name)}"
 
         for name, param in model_module.named_parameters():
+            # [LoRA] Skip adapter-specific parameters during weight transfer.
+            if _is_lora_param(name):
+                continue
+            # [LoRA] Remap wrapped layer names: LoRA wrappers insert ".base_layer."
+            name = name.replace(".base_layer.", ".")
+
             yield _compute_fqn(name), param
 
         for name, buffer in model_module.named_buffers():
@@ -179,6 +191,13 @@ def _named_params_and_buffers_global(
             # for model without ddp wrap
             if not name.startswith("module.module."):
                 name = "module." + name
+
+            # [LoRA] Skip adapter-specific parameters during weight transfer.
+            # Base weights are already merged via merge_lora_weights() before transfer.
+            if _is_lora_param(name):
+                continue
+            # [LoRA] Remap wrapped layer names: LoRA wrappers insert ".base_layer."
+            name = name.replace(".base_layer.", ".")
 
             decoder_layers_pattern = r"module\.module\.decoder\.layers\.(\d+)\.(.+)"
             match = re.match(decoder_layers_pattern, name)
