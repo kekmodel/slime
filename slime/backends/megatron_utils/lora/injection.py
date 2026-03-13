@@ -9,6 +9,7 @@ import torch.nn as nn
 
 from slime.backends.megatron_utils.lora.config import LoRAConfig
 from slime.backends.megatron_utils.lora.layers import (
+    LoRAColumnParallelLinear,
     LoRAFusedFC1,
     LoRAFusedQKV,
     LoRARowParallelLinear,
@@ -44,16 +45,45 @@ def inject_lora_adapters(
         unwrapped = _unwrap_ddp(model_chunk)
         for layer in _get_decoder_layers(unwrapped):
             if has_qkv:
-                layer.self_attention.linear_qkv = LoRAFusedQKV(
-                    layer.self_attention.linear_qkv,
-                    rank=config.rank,
-                    alpha=config.alpha,
-                    num_q_heads_per_tp=num_q_heads_per_tp,
-                    num_kv_heads_per_tp=num_kv_heads_per_tp,
-                    head_dim=head_dim,
-                    dropout=config.dropout,
-                )
-                count += 1
+                attn = layer.self_attention
+                if hasattr(attn, "linear_qkv"):
+                    # Standard fused QKV attention
+                    attn.linear_qkv = LoRAFusedQKV(
+                        attn.linear_qkv,
+                        rank=config.rank,
+                        alpha=config.alpha,
+                        num_q_heads_per_tp=num_q_heads_per_tp,
+                        num_kv_heads_per_tp=num_kv_heads_per_tp,
+                        head_dim=head_dim,
+                        dropout=config.dropout,
+                    )
+                    count += 1
+                else:
+                    # MLA (Multi-Latent Attention): separate Q and KV projections.
+                    # Target the up-projections (ColumnParallelLinear) which expand from
+                    # compressed latent dims to per-head dims — most impactful for LoRA.
+                    has_q = "q_proj" in targets
+                    has_kv = "k_proj" in targets or "v_proj" in targets
+
+                    if has_q:
+                        # Prefer linear_q_up_proj (compressed Q path), fall back to linear_q_proj (direct Q)
+                        q_attr = "linear_q_up_proj" if hasattr(attn, "linear_q_up_proj") else "linear_q_proj"
+                        q_layer = getattr(attn, q_attr, None)
+                        if q_layer is not None:
+                            setattr(
+                                attn,
+                                q_attr,
+                                LoRAColumnParallelLinear(
+                                    q_layer, rank=config.rank, alpha=config.alpha, dropout=config.dropout
+                                ),
+                            )
+                            count += 1
+
+                    if has_kv and hasattr(attn, "linear_kv_up_proj"):
+                        attn.linear_kv_up_proj = LoRAColumnParallelLinear(
+                            attn.linear_kv_up_proj, rank=config.rank, alpha=config.alpha, dropout=config.dropout
+                        )
+                        count += 1
 
             if has_o:
                 layer.self_attention.linear_proj = LoRARowParallelLinear(

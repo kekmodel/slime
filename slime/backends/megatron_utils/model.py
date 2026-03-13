@@ -162,26 +162,32 @@ def setup_model_and_optimizer(
         from slime.backends.megatron_utils.lora import LoRAConfig, freeze_base_params, inject_lora_adapters
 
         lora_config = LoRAConfig.from_args(args)
-
-        # [I1] Derive head counts from the actual model to handle num_kv_heads < tp_size.
-        # Megatron replicates KV heads when num_kv_heads < tp_size, so the actual
-        # per-TP output dimension is set correctly in the base layer.
         head_dim = args.kv_channels if args.kv_channels else (args.hidden_size // args.num_attention_heads)
-        first_layer = None
-        for model_chunk in model:
-            unwrapped = model_chunk.module if hasattr(model_chunk, "module") else model_chunk
-            if hasattr(unwrapped, "decoder") and len(unwrapped.decoder.layers) > 0:
-                first_layer = unwrapped.decoder.layers[0]
-                break
-        assert first_layer is not None, "No decoder layers found in model"
 
-        qkv_out_per_tp = first_layer.self_attention.linear_qkv.output_size_per_partition
-        # qkv_out_per_tp = (num_q_heads_per_tp + 2 * num_kv_heads_per_tp) * head_dim
-        tp_size = mpu.get_tensor_model_parallel_world_size()
-        num_q_heads_per_tp = args.num_attention_heads // tp_size
-        # Solve for num_kv_heads_per_tp from qkv_out:
-        # qkv_out = q_per_tp * head_dim + 2 * kv_per_tp * head_dim
-        num_kv_heads_per_tp = (qkv_out_per_tp - num_q_heads_per_tp * head_dim) // (2 * head_dim)
+        is_mla = getattr(args, "multi_latent_attention", False)
+        if is_mla:
+            # MLA uses separate Q/KV projections (not fused QKV), no head count derivation needed.
+            num_q_heads_per_tp = 0
+            num_kv_heads_per_tp = 0
+        else:
+            # [I1] Derive head counts from the actual model to handle num_kv_heads < tp_size.
+            # Megatron replicates KV heads when num_kv_heads < tp_size, so the actual
+            # per-TP output dimension is set correctly in the base layer.
+            first_layer = None
+            for model_chunk in model:
+                unwrapped = model_chunk.module if hasattr(model_chunk, "module") else model_chunk
+                if hasattr(unwrapped, "decoder") and len(unwrapped.decoder.layers) > 0:
+                    first_layer = unwrapped.decoder.layers[0]
+                    break
+            assert first_layer is not None, "No decoder layers found in model"
+
+            qkv_out_per_tp = first_layer.self_attention.linear_qkv.output_size_per_partition
+            # qkv_out_per_tp = (num_q_heads_per_tp + 2 * num_kv_heads_per_tp) * head_dim
+            tp_size = mpu.get_tensor_model_parallel_world_size()
+            num_q_heads_per_tp = args.num_attention_heads // tp_size
+            # Solve for num_kv_heads_per_tp from qkv_out:
+            # qkv_out = q_per_tp * head_dim + 2 * kv_per_tp * head_dim
+            num_kv_heads_per_tp = (qkv_out_per_tp - num_q_heads_per_tp * head_dim) // (2 * head_dim)
 
         inject_lora_adapters(model, lora_config, num_q_heads_per_tp, num_kv_heads_per_tp, head_dim)
         freeze_base_params(model)
@@ -778,10 +784,11 @@ def save(
 
 
 def _save_lora_adapter(iteration: int, model: Sequence[DDP], args) -> None:
-    """[I5] Save LoRA adapter weights with proper TP all-gather.
+    """[I5] Save LoRA adapter weights with proper TP all-gather, PP partitioning, and EP gathering.
 
-    All TP ranks participate in all_gather (collective op), but only the main rank writes to disk.
-    This produces a complete (un-sharded) adapter checkpoint that can be loaded with any TP configuration.
+    All TP/EP ranks participate in collectives, but only the main rank per PP stage writes to disk.
+    PP > 1: saves per-PP-rank files (adapter_model_pp{rank:02d}.bin) since each PP rank has different layers.
+    EP > 1: gathers expert LoRA params across EP ranks (dim=0) to save the full expert set.
     """
     import json
     from pathlib import Path
@@ -790,34 +797,62 @@ def _save_lora_adapter(iteration: int, model: Sequence[DDP], args) -> None:
 
     save_dir = Path(args.save) / f"lora_adapter_iter_{iteration:07d}"
 
-    # [I5] All TP ranks must participate in all_gather (it's a collective op).
-    # Gather LoRA params to full tensors across TP.
+    pp_size = mpu.get_pipeline_model_parallel_world_size()
+    pp_rank = mpu.get_pipeline_model_parallel_rank()
+    ep_size = mpu.get_expert_model_parallel_world_size()
+
+    # All TP/EP ranks must participate in collectives (all_gather is collective).
+    # VP (virtual pipeline): prefix names with vp_stage to avoid key collisions
+    # when multiple VP chunks on the same PP rank have overlapping layer indices.
+    num_vp_chunks = len(model)
     adapter_state = {}
-    for model_chunk in model:
+    for vp_stage, model_chunk in enumerate(model):
         unwrapped = model_chunk.module if hasattr(model_chunk, "module") else model_chunk
         for name, param in unwrapped.named_parameters():
-            if "lora_" in name:
-                full_param = all_gather_param(name, param)
-                adapter_state[name] = full_param.cpu()
+            if "lora_" not in name:
+                continue
 
-    # Only main rank writes to disk
-    if mpu.get_data_parallel_rank() == 0 and mpu.get_tensor_model_parallel_rank() == 0:
+            # TP all-gather (for LoRA params with tensor_model_parallel=True)
+            full_param = all_gather_param(name, param)
+
+            # EP all-gather for expert LoRA params (concat on dim=0, the expert dimension)
+            if ep_size > 1 and ".experts." in name and "_lora_" in name:
+                ep_group = mpu.get_expert_model_parallel_group()
+                parts = [torch.empty_like(full_param) for _ in range(ep_size)]
+                torch.distributed.all_gather(parts, full_param, group=ep_group)
+                full_param = torch.cat(parts, dim=0)
+
+            save_name = f"vp_stages.{vp_stage}.{name}" if num_vp_chunks > 1 else name
+            adapter_state[save_name] = full_param.cpu()
+
+    # Only main rank writes to disk: DP rank 0, TP rank 0, EP rank 0.
+    # Each PP rank saves its own file (they have different layers).
+    is_save_rank = (
+        mpu.get_data_parallel_rank() == 0
+        and mpu.get_tensor_model_parallel_rank() == 0
+        and mpu.get_expert_model_parallel_rank() == 0
+    )
+    if is_save_rank:
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        torch.save(adapter_state, save_dir / "adapter_model.bin")
+        filename = f"adapter_model_pp{pp_rank:02d}.bin" if pp_size > 1 else "adapter_model.bin"
+        torch.save(adapter_state, save_dir / filename)
 
-        from slime.backends.megatron_utils.lora.config import LoRAConfig
+        # Config saved once (only from PP rank 0)
+        if pp_rank == 0:
+            from slime.backends.megatron_utils.lora.config import LoRAConfig
 
-        config = LoRAConfig.from_args(args)
-        config_dict = {
-            "peft_type": "LORA",
-            "r": config.rank,
-            "lora_alpha": config.alpha,
-            "target_modules": list(config.target_modules),
-        }
-        (save_dir / "lora_config.json").write_text(json.dumps(config_dict, indent=2))
+            config = LoRAConfig.from_args(args)
+            config_dict = {
+                "peft_type": "LORA",
+                "r": config.rank,
+                "lora_alpha": config.alpha,
+                "target_modules": list(config.target_modules),
+                "pp_size": pp_size,
+            }
+            (save_dir / "lora_config.json").write_text(json.dumps(config_dict, indent=2))
 
-        logger.info(f"Saved LoRA adapter to {save_dir}")
+        logger.info(f"Saved LoRA adapter to {save_dir} (PP rank {pp_rank}/{pp_size})")
 
     # Barrier to ensure save completes before any rank proceeds
     if torch.distributed.is_initialized():

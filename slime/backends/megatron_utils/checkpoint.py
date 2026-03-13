@@ -81,29 +81,58 @@ def load_lora_adapter(model, adapter_path: str) -> None:
 
     The adapter checkpoint contains un-sharded (full) tensors.
     Each TP rank extracts its shard based on the TP attributes set during injection.
+    PP > 1: loads per-PP-rank files (adapter_model_pp{rank:02d}.bin).
+    EP > 1: extracts this EP rank's expert shard from the full expert set.
     """
     import torch
     from megatron.core import parallel_state as mpu
 
-    adapter_file = Path(adapter_path) / "adapter_model.bin"
-    adapter_state = torch.load(adapter_file, map_location="cpu", weights_only=True)
-
+    adapter_dir = Path(adapter_path)
+    pp_rank = mpu.get_pipeline_model_parallel_rank()
+    pp_size = mpu.get_pipeline_model_parallel_world_size()
     tp_rank = mpu.get_tensor_model_parallel_rank()
     tp_size = mpu.get_tensor_model_parallel_world_size()
+    ep_rank = mpu.get_expert_model_parallel_rank()
+    ep_size = mpu.get_expert_model_parallel_world_size()
+
+    # Determine which file to load based on PP configuration
+    pp_file = adapter_dir / f"adapter_model_pp{pp_rank:02d}.bin"
+    if pp_size > 1 and pp_file.exists():
+        adapter_file = pp_file
+    else:
+        adapter_file = adapter_dir / "adapter_model.bin"
+
+    adapter_state = torch.load(adapter_file, map_location="cpu", weights_only=True)
+
+    # VP (virtual pipeline): checkpoint may use vp_stage-prefixed keys to avoid
+    # name collisions when multiple VP chunks share the same PP rank.
+    num_vp_chunks = len(model)
 
     loaded = 0
-    for model_chunk in model:
+    for vp_stage, model_chunk in enumerate(model):
         unwrapped = model_chunk.module if hasattr(model_chunk, "module") else model_chunk
         for name, param in unwrapped.named_parameters():
-            if name not in adapter_state:
+            # Try VP-prefixed key first, fall back to raw name (backward compat)
+            vp_name = f"vp_stages.{vp_stage}.{name}" if num_vp_chunks > 1 else name
+            if vp_name in adapter_state:
+                lookup_name = vp_name
+            elif name in adapter_state:
+                lookup_name = name
+            else:
                 continue
-            full_tensor = adapter_state[name]
+            full_tensor = adapter_state[lookup_name]
 
-            # Shard if needed based on TP attributes
+            # TP shard based on TP attributes
             if getattr(param, "tensor_model_parallel", False) and tp_size > 1:
                 dim = param.partition_dim
                 chunk_size = full_tensor.shape[dim] // tp_size
                 full_tensor = full_tensor.narrow(dim, tp_rank * chunk_size, chunk_size)
+
+            # EP shard for expert LoRA params (dim=0 is the expert dimension)
+            if ep_size > 1 and ".experts." in name and "_lora_" in name:
+                e_total = full_tensor.shape[0]
+                e_local = e_total // ep_size
+                full_tensor = full_tensor[ep_rank * e_local : (ep_rank + 1) * e_local]
 
             param.data.copy_(full_tensor.to(param.device))
             loaded += 1
