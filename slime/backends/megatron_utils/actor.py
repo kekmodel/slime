@@ -536,7 +536,9 @@ class MegatronTrainRayActor(TrainRayActor):
                 for model_chunk in self.model:
                     merge_lora_weights(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
 
-                # [C2] Colocate path: CPU backup has unmerged weights. Re-backup after merge.
+                # [C2] Colocate path: CPU backup currently has unmerged weights, but
+                # update_weights reads from CPU backup. Re-backup merged GPU weights to CPU
+                # so the weight transfer sends correct (merged) values to SGLang.
                 if self.args.colocate and self.args.enable_weights_backuper:
                     self.weights_backuper.backup("actor")
 
@@ -550,7 +552,9 @@ class MegatronTrainRayActor(TrainRayActor):
                     for model_chunk in self.model:
                         unmerge_lora_weights(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
 
-                    # [C2] Colocate path: Restore CPU backup to unmerged state
+                    # [C2] Colocate path: CPU backup still has merged weights from above.
+                    # Re-backup unmerged GPU weights so CPU state matches GPU for next iteration.
+                    # Both backups (pre-transfer merged, post-transfer unmerged) are necessary.
                     if self.args.colocate and self.args.enable_weights_backuper:
                         self.weights_backuper.backup("actor")
 

@@ -34,7 +34,10 @@ class LoRAConfig:
             alpha = 2 * rank
         elif alpha is None:
             alpha = 0.0
-        target_modules = tuple(getattr(args, "lora_target_modules", []))
+        target_modules_raw = getattr(args, "lora_target_modules", None)
+        if target_modules_raw is None:
+            target_modules_raw = DEFAULT_TARGET_MODULES if rank > 0 else []
+        target_modules = tuple(target_modules_raw)
         dropout = getattr(args, "lora_dropout", 0.0)
 
         if "expert" in target_modules and not getattr(args, "num_experts", None):

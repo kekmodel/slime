@@ -762,8 +762,12 @@ def save(
         opt_param_scheduler (OptimizerParamScheduler): LR/WD scheduler.
     """
     args = get_args()
-    # [I4] Adapter-only save when LoRA is enabled
-    if getattr(args, "lora_rank", 0) > 0 and getattr(args, "save_adapter_only", False):
+    # [I4] Adapter-only save when LoRA is enabled (defaults to True when lora_rank > 0)
+    lora_enabled = getattr(args, "lora_rank", 0) > 0
+    save_adapter_only = getattr(args, "save_adapter_only", None)
+    if save_adapter_only is None and lora_enabled:
+        save_adapter_only = True
+    if lora_enabled and save_adapter_only:
         _save_lora_adapter(iteration, model, args)
         return
 
