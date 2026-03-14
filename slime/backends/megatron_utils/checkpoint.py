@@ -108,9 +108,11 @@ def load_lora_adapter(model, adapter_path: str) -> None:
     # name collisions when multiple VP chunks share the same PP rank.
     num_vp_chunks = len(model)
 
+    from slime.backends.megatron_utils.lora import unwrap_ddp
+
     loaded = 0
     for vp_stage, model_chunk in enumerate(model):
-        unwrapped = model_chunk.module if hasattr(model_chunk, "module") else model_chunk
+        unwrapped = unwrap_ddp(model_chunk)
         for name, param in unwrapped.named_parameters():
             # Try VP-prefixed key first, fall back to raw name (backward compat)
             vp_name = f"vp_stages.{vp_stage}.{name}" if num_vp_chunks > 1 else name

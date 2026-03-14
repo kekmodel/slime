@@ -159,7 +159,12 @@ def setup_model_and_optimizer(
     )
 
     if lora_enabled:
-        from slime.backends.megatron_utils.lora import LoRAConfig, freeze_base_params, inject_lora_adapters
+        from slime.backends.megatron_utils.lora import (
+            LoRAConfig,
+            freeze_base_params,
+            inject_lora_adapters,
+            unwrap_ddp,
+        )
 
         lora_config = LoRAConfig.from_args(args)
         head_dim = args.kv_channels if args.kv_channels else (args.hidden_size // args.num_attention_heads)
@@ -175,7 +180,7 @@ def setup_model_and_optimizer(
             # per-TP output dimension is set correctly in the base layer.
             first_layer = None
             for model_chunk in model:
-                unwrapped = model_chunk.module if hasattr(model_chunk, "module") else model_chunk
+                unwrapped = unwrap_ddp(model_chunk)
                 if hasattr(unwrapped, "decoder") and len(unwrapped.decoder.layers) > 0:
                     first_layer = unwrapped.decoder.layers[0]
                     break
@@ -762,12 +767,9 @@ def save(
         opt_param_scheduler (OptimizerParamScheduler): LR/WD scheduler.
     """
     args = get_args()
-    # [I4] Adapter-only save when LoRA is enabled (defaults to True when lora_rank > 0)
+    # [I4] Adapter-only save when LoRA is enabled (default set in slime_validate_args)
     lora_enabled = getattr(args, "lora_rank", 0) > 0
-    save_adapter_only = getattr(args, "save_adapter_only", None)
-    if save_adapter_only is None and lora_enabled:
-        save_adapter_only = True
-    if lora_enabled and save_adapter_only:
+    if lora_enabled and getattr(args, "save_adapter_only", False):
         _save_lora_adapter(iteration, model, args)
         return
 
@@ -797,6 +799,7 @@ def _save_lora_adapter(iteration: int, model: Sequence[DDP], args) -> None:
     import json
     from pathlib import Path
 
+    from slime.backends.megatron_utils.lora import unwrap_ddp
     from slime.backends.megatron_utils.update_weight.common import all_gather_param
 
     save_dir = Path(args.save) / f"lora_adapter_iter_{iteration:07d}"
@@ -811,7 +814,7 @@ def _save_lora_adapter(iteration: int, model: Sequence[DDP], args) -> None:
     num_vp_chunks = len(model)
     adapter_state = {}
     for vp_stage, model_chunk in enumerate(model):
-        unwrapped = model_chunk.module if hasattr(model_chunk, "module") else model_chunk
+        unwrapped = unwrap_ddp(model_chunk)
         for name, param in unwrapped.named_parameters():
             if "lora_" not in name:
                 continue

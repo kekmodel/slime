@@ -8,6 +8,7 @@ from collections.abc import Sequence
 import torch.nn as nn
 
 from slime.backends.megatron_utils.lora.config import LoRAConfig
+from slime.backends.megatron_utils.lora.utils import unwrap_ddp
 from slime.backends.megatron_utils.lora.layers import (
     LoRAColumnParallelLinear,
     LoRAFusedFC1,
@@ -42,7 +43,7 @@ def inject_lora_adapters(
 
     count = 0
     for model_chunk in model:
-        unwrapped = _unwrap_ddp(model_chunk)
+        unwrapped = unwrap_ddp(model_chunk)
         for layer in _get_decoder_layers(unwrapped):
             if has_qkv:
                 attn = layer.self_attention
@@ -134,7 +135,7 @@ def freeze_base_params(model: Sequence[nn.Module]) -> None:
     frozen_count = 0
     trainable_count = 0
     for model_chunk in model:
-        unwrapped = _unwrap_ddp(model_chunk)
+        unwrapped = unwrap_ddp(model_chunk)
         for name, param in unwrapped.named_parameters():
             if "lora_" in name:
                 param.requires_grad = True
@@ -143,13 +144,6 @@ def freeze_base_params(model: Sequence[nn.Module]) -> None:
                 param.requires_grad = False
                 frozen_count += 1
     logger.info(f"Frozen {frozen_count} base params, {trainable_count} LoRA params trainable")
-
-
-def _unwrap_ddp(model: nn.Module) -> nn.Module:
-    """Unwrap DDP/FSDP wrapper to get inner module."""
-    if hasattr(model, "module"):
-        return _unwrap_ddp(model.module)
-    return model
 
 
 def _get_decoder_layers(model: nn.Module):

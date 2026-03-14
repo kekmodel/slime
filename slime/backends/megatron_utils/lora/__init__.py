@@ -6,6 +6,8 @@ from slime.backends.megatron_utils.lora.merge import (
     merge_lora_weights,
     unmerge_lora_weights,
 )
+from slime.backends.megatron_utils.lora.utils import unwrap_ddp
+
 
 __all__ = [
     "LoRAConfig",
@@ -15,4 +17,5 @@ __all__ = [
     "unmerge_lora_weights",
     "disable_lora",
     "enable_lora",
+    "unwrap_ddp",
 ]

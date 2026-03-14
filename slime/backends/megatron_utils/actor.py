@@ -389,10 +389,10 @@ class MegatronTrainRayActor(TrainRayActor):
             if self.args.compute_advantages_and_returns:
                 if self._lora_enabled and self._needs_ref_logprobs:
                     # [I2] LoRA: adapter off = ref model (no weight switch needed)
-                    from slime.backends.megatron_utils.lora import disable_lora, enable_lora
+                    from slime.backends.megatron_utils.lora import disable_lora, enable_lora, unwrap_ddp
 
                     for model_chunk in self.model:
-                        disable_lora(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
+                        disable_lora(unwrap_ddp(model_chunk))
                     try:
                         if self.args.use_routing_replay:
                             os.environ["ROUTING_REPLAY_STAGE"] = "fallthrough"
@@ -405,7 +405,7 @@ class MegatronTrainRayActor(TrainRayActor):
                         )
                     finally:
                         for model_chunk in self.model:
-                            enable_lora(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
+                            enable_lora(unwrap_ddp(model_chunk))
                     # LoRA path: model was never swapped, no _switch_model needed
                 elif "ref" in self.weights_backuper.backup_tags:
                     if self.args.use_routing_replay:
@@ -530,11 +530,11 @@ class MegatronTrainRayActor(TrainRayActor):
 
         with torch_memory_saver.disable() if self.args.offload_train else nullcontext():
             if self._lora_enabled:
-                from slime.backends.megatron_utils.lora import merge_lora_weights, unmerge_lora_weights
+                from slime.backends.megatron_utils.lora import merge_lora_weights, unmerge_lora_weights, unwrap_ddp
 
                 # Merge LoRA into base weights on GPU before transfer
                 for model_chunk in self.model:
-                    merge_lora_weights(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
+                    merge_lora_weights(unwrap_ddp(model_chunk))
 
                 # [C2] Colocate path: CPU backup currently has unmerged weights, but
                 # update_weights reads from CPU backup. Re-backup merged GPU weights to CPU
@@ -550,7 +550,7 @@ class MegatronTrainRayActor(TrainRayActor):
                 if self._lora_enabled:
                     # Unmerge to restore base weights for continued training
                     for model_chunk in self.model:
-                        unmerge_lora_weights(model_chunk.module if hasattr(model_chunk, "module") else model_chunk)
+                        unmerge_lora_weights(unwrap_ddp(model_chunk))
 
                     # [C2] Colocate path: CPU backup still has merged weights from above.
                     # Re-backup unmerged GPU weights so CPU state matches GPU for next iteration.

@@ -4,10 +4,10 @@ import argparse
 
 import pytest
 
+from slime.backends.megatron_utils.lora.config import DEFAULT_TARGET_MODULES, LoRAConfig
+
 
 def test_lora_config_from_args():
-    from slime.backends.megatron_utils.lora.config import LoRAConfig
-
     args = argparse.Namespace(
         lora_rank=64,
         lora_alpha=128,
@@ -23,8 +23,6 @@ def test_lora_config_from_args():
 
 
 def test_lora_config_disabled():
-    from slime.backends.megatron_utils.lora.config import LoRAConfig
-
     args = argparse.Namespace(
         lora_rank=0,
         lora_alpha=0,
@@ -36,8 +34,6 @@ def test_lora_config_disabled():
 
 
 def test_lora_config_default_alpha():
-    from slime.backends.megatron_utils.lora.config import LoRAConfig
-
     args = argparse.Namespace(
         lora_rank=32,
         lora_alpha=None,
@@ -49,8 +45,6 @@ def test_lora_config_default_alpha():
 
 
 def test_lora_config_expert_requires_num_experts():
-    from slime.backends.megatron_utils.lora.config import LoRAConfig
-
     args = argparse.Namespace(
         lora_rank=64,
         lora_alpha=128,
@@ -64,8 +58,6 @@ def test_lora_config_expert_requires_num_experts():
 
 def test_lora_config_default_target_modules():
     """When --lora-rank > 0 but --lora-target-modules is not specified (None), defaults to DEFAULT_TARGET_MODULES."""
-    from slime.backends.megatron_utils.lora.config import DEFAULT_TARGET_MODULES, LoRAConfig
-
     args = argparse.Namespace(
         lora_rank=16,
         lora_alpha=None,
@@ -79,8 +71,6 @@ def test_lora_config_default_target_modules():
 
 def test_lora_config_no_default_when_disabled():
     """When lora_rank=0, target_modules stays empty even if lora_target_modules is None."""
-    from slime.backends.megatron_utils.lora.config import LoRAConfig
-
     args = argparse.Namespace(
         lora_rank=0,
         lora_alpha=None,
